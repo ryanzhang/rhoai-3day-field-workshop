@@ -1,97 +1,69 @@
-= Module 2: GPUs the DRA way
-:navtitle: Module 2: GPUs the DRA way
+= 模块 2：DRA 方式使用 GPU
+:navtitle: 模块 2：DRA 方式使用 GPU
 
-GPUs are the most expensive thing on an AI cluster, and customers ask two questions about them
-before anything else: _how does a workload get a GPU, and can more than one workload share it?_
-For years the answer was the device plugin: a node advertises `nvidia.com/gpu: 1`, a pod asks for
-one, and that is all the scheduler knows. Kubernetes Dynamic Resource Allocation (DRA) replaces
-that counter with a description of every device, its model, memory, architecture and driver,
-and lets a workload ask for a device by its properties and share it explicitly.
+GPU 是 AI 集群上最昂贵的资源，客户通常会首先提出两个问题：_工作负载如何获取 GPU？多个工作负载能否共享同一块 GPU？_ 多年来，答案是设备插件（device plugin）：节点声明 `nvidia.com/gpu: 1`，Pod 请求一个，这就是调度器所知道的全部。Kubernetes Dynamic Resource Allocation（DRA）用每个设备的完整描述取代了这个计数器，包括型号、显存、架构和驱动信息，并允许工作负载按属性请求设备，以及显式地共享设备。
 
-In this module you let the cluster recognise the GPU, load the NVIDIA driver, turn on NVIDIA's DRA driver, read what it publishes
-about the L4 GPU, and claim that GPU three ways: exclusively, with a property selector that cannot
-match, and shared between two pods.
+在本模块中，您将让集群识别 GPU，加载 NVIDIA 驱动程序，启用 NVIDIA DRA 驱动，读取 L4 GPU 的发布信息，并以三种方式申请该 GPU：独占使用、使用无法匹配的属性选择器，以及两个 Pod 共享同一块 GPU。
 
-.New to DRA?
+.初次接触 DRA？
 [%collapsible]
 ====
-* *DeviceClass* — a cluster-wide category of devices (for example "NVIDIA GPUs") defined by a
-  selector; workloads ask for devices of a class.
-* *ResourceSlice* — published by a DRA driver for each node: the list of devices on that node and
-  each device's attributes and capacity.
-* *ResourceClaim* — a request for devices, which the scheduler allocates to concrete devices; pods
-  that reference the same claim share its devices.
-* *ResourceClaimTemplate* — a blueprint from which Kubernetes creates one new claim per pod, so
-  every pod gets its own device.
-* *CEL (Common Expression Language)* — the expression language a claim uses to select devices by
-  attribute, for example `device.attributes['gpu.nvidia.com'].productName == 'NVIDIA L4'`.
+* *DeviceClass* — 由选择器定义的集群级设备类别（例如"NVIDIA GPU"）；工作负载按类别申请设备。
+* *ResourceSlice* — DRA 驱动为每个节点发布的资源切片：列出该节点上的所有设备及其属性和容量。
+* *ResourceClaim* — 对设备的申请，由调度器分配到具体设备；引用同一申请的 Pod 共享其设备。
+* *ResourceClaimTemplate* — 模板，Kubernetes 为每个 Pod 创建一个新申请，使每个 Pod 获得独立的设备。
+* *CEL（Common Expression Language）* — 申请用来按属性选择设备的表达式语言，例如 `device.attributes['gpu.nvidia.com'].productName == 'NVIDIA L4'`。
 ====
 
-== Technical context
+== 技术背景
 
-The NVIDIA GPU Operator ({gpu_operator_version} here) can build two different stacks on a GPU
-node:
+NVIDIA GPU Operator（本例为 {gpu_operator_version}）可在 GPU 节点上构建两种不同的栈：
 
 [cols="1,2,2",options="header"]
 |===
-| | Device plugin stack (`ClusterPolicy`) | DRA stack (`GPUCluster`)
+| | 设备插件栈（`ClusterPolicy`） | DRA 栈（`GPUCluster`）
 
-| What the scheduler sees
-| an integer, `nvidia.com/gpu: 1`, on the node
-| a `ResourceSlice` listing each GPU with its attributes (product name, memory, architecture,
-  driver and CUDA versions, PCI address)
+| 调度器所见
+| 节点上的整数 `nvidia.com/gpu: 1`
+| 列出每块 GPU 及其属性的 `ResourceSlice`（产品名、显存、架构、驱动和 CUDA 版本、PCI 地址）
 
-| How a pod asks
+| Pod 申请方式
 | `resources.limits: nvidia.com/gpu: 1`
-| `resourceClaims` pointing at a `ResourceClaim` or `ResourceClaimTemplate`, which can select by
-  attribute
+| `resourceClaims` 指向一个 `ResourceClaim` 或 `ResourceClaimTemplate`，可按属性选择
 
-| Sharing
-| configured node-wide (time-slicing, MPS) outside the pod spec
-| explicit in the API: pods that reference one claim share its device
+| 共享方式
+| 在 Pod 规格之外按节点配置（time-slicing、MPS）
+| 在 API 中显式指定：引用同一申请的 Pod 共享其设备
 
-| Who allocates
-| the kubelet's device manager picks a device
-| the scheduler allocates the claim before the pod is placed, and records which device it chose
+| 分配者
+| kubelet 的设备管理器选择设备
+| 调度器在放置 Pod 之前分配申请，并记录所选设备
 |===
 
-The driver is installed separately from either stack: an `NVIDIADriver` CR runs a driver
-container on every node it selects, which loads the NVIDIA kernel modules. The `GPUCluster` CR then
-runs the NVIDIA DRA driver (a kubelet plugin per GPU node), which discovers the GPUs through the
-loaded driver and publishes them as ResourceSlices, plus a DCGM exporter for GPU metrics. Kubernetes
-{ocp_version}'s scheduler does the rest: DRA (`resource.k8s.io/v1`) is a stable Kubernetes API.
+驱动程序与两种栈分开安装：`NVIDIADriver` CR 在其选中的每个节点上运行一个驱动容器，加载 NVIDIA 内核模块。`GPUCluster` CR 随后运行 NVIDIA DRA 驱动（每个 GPU 节点上的 kubelet 插件），通过已加载的驱动发现 GPU 并以 ResourceSlice 形式发布，同时运行 DCGM exporter 采集 GPU 指标。Kubernetes {ocp_version} 的调度器完成其余工作：DRA（`resource.k8s.io/v1`）是稳定的 Kubernetes API。
 
-The rest of this workshop uses the DRA stack, so every GPU workload, including the model servers on
-Day 1 and Day 2, asks for its GPU through a claim.
+本工作坊其余部分使用 DRA 栈，因此第 1 天和第 2 天的所有 GPU 工作负载，包括模型服务器，都通过申请（Claim）获取 GPU。
 
-IMPORTANT: Do not create a `ClusterPolicy` on this cluster. The two stacks must not manage the same
-GPU node at the same time.
+IMPORTANT: 请勿在此集群上创建 `ClusterPolicy`。两种栈不能同时管理同一个 GPU 节点。
 
-// NOT-IN-DOCS: OpenShift AI 3.5 documents GPUs through the device plugin and hardware profiles; the
-// GPUCluster DRA stack is NVIDIA's (v1alpha1 API in GPU Operator 26.7). Listed in the reference page.
-NOTE: The `GPUCluster` API is `v1alpha1` in GPU Operator {gpu_operator_version}, and OpenShift AI
-{rhoai_version} documents GPU access through the device plugin and hardware profiles. This module
-teaches the DRA mechanism directly; see xref:91-reference.adoc[Technical Reference] for what that
-does and does not imply about support.
+// NOT-IN-DOCS: OpenShift AI 3.5 通过设备插件和硬件配置文件记录 GPU；GPUCluster DRA 栈来自 NVIDIA（GPU Operator 26.7 中的 v1alpha1 API）。详见参考页面。
+NOTE: `GPUCluster` API 在 GPU Operator {gpu_operator_version} 中为 `v1alpha1`，OpenShift AI {rhoai_version} 通过设备插件和硬件配置文件记录 GPU 访问。本模块直接讲授 DRA 机制；关于其支持含义，请参阅 xref:91-reference.adoc[技术参考]。
 
-== Learning objectives
+== 学习目标
 
-* Turn on hardware discovery and find the GPU node by its NFD label.
-* Load the NVIDIA driver with an `NVIDIADriver` CR and prove it with `nvidia-smi`.
-* Turn on the NVIDIA DRA driver with a `GPUCluster` CR.
-* Read the GPU's attributes from its `ResourceSlice` and explain what a `DeviceClass` selects.
-* Claim a GPU with a `ResourceClaimTemplate` and a CEL selector, and read the allocation.
-* Show that an exclusive claim blocks a second pod, that an unsatisfiable selector blocks a pod,
-  and that a shared `ResourceClaim` lets two pods use one GPU.
+* 启用硬件发现，通过 NFD 标签找到 GPU 节点。
+* 使用 `NVIDIADriver` CR 加载 NVIDIA 驱动，并用 `nvidia-smi` 验证。
+* 使用 `GPUCluster` CR 启用 NVIDIA DRA 驱动。
+* 从 `ResourceSlice` 中读取 GPU 属性，并解释 `DeviceClass` 的选择方式。
+* 使用 `ResourceClaimTemplate` 和 CEL 选择器申请 GPU，并读取分配结果。
+* 展示独占申请会阻止第二个 Pod，不满足的选择器会阻止 Pod，以及共享 `ResourceClaim` 允许两个 Pod 使用同一块 GPU。
 
-== Exercise 1: Let the cluster recognise the GPU
+== 练习 1：让集群识别 GPU
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m2-ex1.mp4[width=100%]
 
-Node Feature Discovery is installed, but it only scans nodes once you create its instance. The
-`NodeFeatureDiscovery` CR starts a worker on every node that reads the PCI bus and labels the node
-with the device classes and vendors it finds. NVIDIA's PCI vendor ID is `10de`.
+Node Feature Discovery 已安装，但只有在创建实例后才开始扫描节点。`NodeFeatureDiscovery` CR 在每个节点上启动一个 worker，读取 PCI 总线并为节点打上设备类别和厂商标签。NVIDIA 的 PCI 厂商 ID 是 `10de`。
 
 [source,yaml]
 ----
@@ -104,8 +76,8 @@ spec:
           deviceClassWhitelist: ["0200", "03", "12"]   # <1>
           deviceLabelFields: ["vendor"]                 # <2>
 ----
-<1> *deviceClassWhitelist* — PCI classes to report: network controllers (`0200`), display controllers (`03`, which includes GPUs) and processing accelerators (`12`).
-<2> *deviceLabelFields* — label by vendor ID, which produces `feature.node.kubernetes.io/pci-<vendor>.present=true`.
+<1> *deviceClassWhitelist* — 要上报的 PCI 类别：网络控制器（`0200`）、显示控制器（`03`，包含 GPU）和处理加速器（`12`）。
+<2> *deviceLabelFields* — 按厂商 ID 打标签，生成 `feature.node.kubernetes.io/pci-<vendor>.present=true`。
 
 [source,bash,role="execute"]
 ----
@@ -136,24 +108,16 @@ oc get nodes -l feature.node.kubernetes.io/pci-10de.present=true \
   -o custom-columns=NODE:.metadata.name,INSTANCE:.metadata.labels.node\\.kubernetes\\.io/instance-type
 ----
 
-Expected result: after a few `waiting for NFD labels...` lines, exactly one node is listed, the
-`g6.2xlarge` GPU node you found in Module 1. The
-cluster now knows which node has an NVIDIA device; every later NVIDIA component selects its nodes
-by this label.
+预期结果：经过几行 `waiting for NFD labels...` 后，列出一个节点，即模块 1 中找到的 `g6.2xlarge` GPU 节点。集群现在知道哪个节点有 NVIDIA 设备；后续所有 NVIDIA 组件都通过此标签选择节点。
 
-== Exercise 2: Load the NVIDIA driver
+== 练习 2：加载 NVIDIA 驱动
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m2-ex2.mp4[width=100%]
 
-The `NVIDIADriver` CR tells the GPU Operator which driver image to run and on which nodes. The
-operator ships a pinned driver image; the CR below uses its digest and selects nodes by the NFD
-label from Exercise 1.
+`NVIDIADriver` CR 告诉 GPU Operator 在哪些节点上运行哪个驱动镜像。Operator 附带一个固定版本的驱动镜像；以下 CR 使用其摘要并通过练习 1 的 NFD 标签选择节点。
 
-IMPORTANT: The GPU Operator labels GPU nodes (`nvidia.com/gpu.present`) only once a `GPUCluster` or
-`ClusterPolicy` exists, and the driver runs only on labelled nodes. The block below therefore also
-creates the `GPUCluster` that Exercise 3 explains; without it the NVIDIADriver reports `ready` while
-running no driver at all.
+IMPORTANT: 只有在 `GPUCluster` 或 `ClusterPolicy` 存在后，GPU Operator 才会为 GPU 节点打标签（`nvidia.com/gpu.present`），驱动也只在已打标签的节点上运行。因此下面的代码块同时创建练习 3 中解释的 `GPUCluster`；没有它，`NVIDIADriver` 会报告 `ready`，但实际上没有运行任何驱动。
 
 [source,yaml,subs="attributes+"]
 ----
@@ -169,10 +133,10 @@ spec:
   tolerations:
   - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}   # <4>
 ----
-<1> *driverType* — `gpu` for a bare-metal or passthrough GPU (the alternatives are vGPU modes).
-<2> *version* — the driver image digest the operator was released with (its `driver-image` related image).
-<3> *nodeSelector* — run the driver only where NFD found an NVIDIA PCI device.
-<4> *tolerations* — the GPU node is tainted, so the driver pod must tolerate the taint.
+<1> *driverType* — `gpu` 适用于裸金属或直通 GPU（其他选项为 vGPU 模式）。
+<2> *version* — Operator 发布时附带的驱动镜像摘要（其 `driver-image` 相关镜像）。
+<3> *nodeSelector* — 仅在 NFD 发现 NVIDIA PCI 设备的节点上运行驱动。
+<4> *tolerations* — GPU 节点有污点，驱动 Pod 必须容忍该污点。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -212,12 +176,9 @@ spec:
 EOF
 ----
 
-Expected result: `nvidiadriver.nvidia.com/gpu-driver created` and
-`gpucluster.nvidia.com/gpu-cluster created`. Creation alone proves nothing; the next block waits for
-the driver to load.
+预期结果：`nvidiadriver.nvidia.com/gpu-driver created` 和 `gpucluster.nvidia.com/gpu-cluster created`。仅创建并不能说明问题；下一步等待驱动加载。
 
-The driver container needs a few minutes to start and load the kernel modules. Wait for the CR to
-report `ready`:
+驱动容器需要几分钟来启动并加载内核模块。等待 CR 报告 `ready`：
 
 [source,bash,role="execute"]
 ----
@@ -232,22 +193,16 @@ oc exec -n nvidia-gpu-operator "$DRIVER_POD" -c nvidia-driver-ctr -- \
   nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
 ----
 
-Expected result: `driver state: …, waiting for the driver pod` repeats for three to five minutes
-while the driver container builds and loads the kernel modules, then the loop ends on
-`driver state: ready` (the CR is ready and its driver pod is Ready), and `nvidia-smi` prints one row:
-`NVIDIA L4, 23034 MiB, 595.91.07` (or the driver version the operator shipped). The kernel
-driver is loaded and talks to the GPU, but the scheduler still cannot hand it out: that is the
-next exercise.
+预期结果：`driver state: …, waiting for the driver pod` 重复三到五分钟，驱动容器构建并加载内核模块后，循环在 `driver state: ready`（CR 就绪，驱动 Pod 已 Ready）时结束，`nvidia-smi` 打印一行：`NVIDIA L4, 23034 MiB, 595.91.07`（或 Operator 附带的驱动版本）。内核驱动已加载并与 GPU 通信，但调度器仍无法分配它——这是下一个练习的内容。
 
-In short: the driver makes the GPU work on the node; it does not make it schedulable.
+简言之：驱动使 GPU 在节点上可用；但不使其对调度器可见。
 
-== Exercise 3: Turn on the DRA driver
+== 练习 3：启用 DRA 驱动
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m2-ex3.mp4[width=100%]
 
-You created this `GPUCluster` in Exercise 2 so the driver could deploy; here is what it runs.
-Re-applying it changes nothing.
+您在练习 2 中已创建了 `GPUCluster`，以便驱动可以部署；以下是它运行的内容。重新应用不会有任何变化。
 
 [source,yaml]
 ----
@@ -263,9 +218,9 @@ spec:
   dcgmExporter:
     enabled: true           # <3>
 ----
-<1> *computeDomains* — multi-node NVLink domains (GB200-class systems); a single L4 does not need them.
-<2> *daemonsets.tolerations* — every DaemonSet the stack runs (DRA kubelet plugin, validator, exporter) must tolerate the GPU taint.
-<3> *dcgmExporter* — publishes GPU utilisation and memory metrics to Prometheus.
+<1> *computeDomains* — 多节点 NVLink 域（适用于 GB200 级系统）；单块 L4 不需要。
+<2> *daemonsets.tolerations* — 该栈运行的每个 DaemonSet（DRA kubelet 插件、验证器、exporter）都必须容忍 GPU 污点。
+<3> *dcgmExporter* — 将 GPU 利用率和显存指标发布到 Prometheus。
 
 [source,bash,role="execute"]
 ----
@@ -293,15 +248,11 @@ done
 oc get pods -n nvidia-gpu-operator
 ----
 
-Expected result: `gpucluster.nvidia.com/gpu-cluster unchanged`, the loop ends on
-`gpucluster state: ready`, and `nvidia-gpu-operator` runs
-`nvidia-dra-driver-kubelet-plugin-…`, `nvidia-dra-validator-…` and `nvidia-dcgm-exporter-dra-…`
-next to the driver pod, all `Running`. There is no device plugin pod: this stack never advertises
-`nvidia.com/gpu`.
+预期结果：`gpucluster.nvidia.com/gpu-cluster unchanged`，循环在 `gpucluster state: ready` 时结束，`nvidia-gpu-operator` 中运行着 `nvidia-dra-driver-kubelet-plugin-…`、`nvidia-dra-validator-…` 和 `nvidia-dcgm-exporter-dra-…`（以及驱动 Pod），全部为 `Running`。没有设备插件 Pod：此栈从不声明 `nvidia.com/gpu`。
 
-== Exercise 4: Read what DRA publishes
+== 练习 4：读取 DRA 发布的信息
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m2-ex4.mp4[width=100%]
 
 [source,bash,role="execute"]
@@ -311,22 +262,16 @@ oc get deviceclass gpu.nvidia.com -o jsonpath='{.spec.selectors[0].cel.expressio
 oc get resourceslices -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{range .spec.devices[*]}  {.name}: {.attributes.productName.string}, {.attributes.architecture.string}, memory {.capacity.memory.value}, driver {.attributes.driverVersion.version}, CUDA {.attributes.cudaComputeCapability.version}{"\n"}{end}{end}'
 ----
 
-Expected result: three device classes, `gpu.nvidia.com`, `mig.nvidia.com` and
-`vfio.gpu.nvidia.com`; the `gpu.nvidia.com` selector is
-`device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`; and the
-GPU node's ResourceSlice lists one device, `gpu-0: NVIDIA L4, Ada Lovelace, memory 23034Mi,
-driver 595.91.7, CUDA 8.9.0`. The scheduler now knows what the device _is_, not just that one
-exists.
+预期结果：三个设备类别 `gpu.nvidia.com`、`mig.nvidia.com` 和 `vfio.gpu.nvidia.com`；`gpu.nvidia.com` 的选择器为 `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`；GPU 节点的 ResourceSlice 列出一个设备：`gpu-0: NVIDIA L4, Ada Lovelace, memory 23034Mi, driver 595.91.7, CUDA 8.9.0`。调度器现在知道该设备_是什么_，而不仅仅是存在一个设备。
 
-In short: a DeviceClass is a selector over the attributes a driver publishes in ResourceSlices.
+简言之：DeviceClass 是对驱动在 ResourceSlice 中发布的属性进行过滤的选择器。
 
-== Exercise 5: Claim the GPU by its properties
+== 练习 5：通过属性申请 GPU
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m2-ex5.mp4[width=100%]
 
-Create a project for the GPU tests, a `ResourceClaimTemplate` that asks for one device of class
-`gpu.nvidia.com` whose product name is `NVIDIA L4`, and a pod that uses it.
+创建一个用于 GPU 测试的 Project、一个申请 `gpu.nvidia.com` 类别中产品名为 `NVIDIA L4` 的设备的 `ResourceClaimTemplate`，以及一个使用它的 Pod。
 
 [source,yaml,subs="attributes+"]
 ----
@@ -351,10 +296,10 @@ spec:
   - resources:
       claims: [{name: gpu}]                         # <4>
 ----
-<1> *deviceClassName* — the category to choose from.
-<2> *selectors* — a CEL filter over the device's published attributes; only matching devices are candidates.
-<3> *resourceClaimTemplateName* — Kubernetes creates a fresh claim for this pod from the template.
-<4> *resources.claims* — which container gets the claimed device.
+<1> *deviceClassName* — 要从中选择的类别。
+<2> *selectors* — 对设备已发布属性进行 CEL 过滤；只有匹配的设备才是候选。
+<3> *resourceClaimTemplateName* — Kubernetes 从模板为此 Pod 创建新申请。
+<4> *resources.claims* — 哪个容器获得申请的设备。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -375,7 +320,7 @@ spec:
           - cel:
               expression: device.attributes['gpu.nvidia.com'].productName == 'NVIDIA L4'
 EOF
-# smi-a first, and only once it holds the GPU, smi-b: the order decides which pod gets the device.
+# 先创建 smi-a，待其持有 GPU 后再创建 smi-b：顺序决定哪个 Pod 获得设备。
 for p in smi-a smi-b; do
 oc apply -n {gpu_namespace} -f - <<EOF
 apiVersion: v1
@@ -404,17 +349,14 @@ oc get resourceclaims -n {gpu_namespace} \
   -o custom-columns=CLAIM:.metadata.name,STATE:.status.allocation.devices.results[0].device,RESERVED_FOR:.status.reservedFor[*].name
 ----
 
-Expected result: `smi-a` becomes Ready and prints `GPU 0: NVIDIA L4 (UUID: GPU-…)`. Two claims
-exist, one per pod, created from the template: `smi-a-gpu-…` is allocated to device `gpu-0` and
-reserved for `smi-a`; `smi-b-gpu-…` has no device. The scheduler allocated the GPU to the first pod
-before placing it.
+预期结果：`smi-a` 变为 Ready 并打印 `GPU 0: NVIDIA L4 (UUID: GPU-…)`。存在两个申请，每个 Pod 一个，均由模板创建：`smi-a-gpu-…` 分配到设备 `gpu-0` 并为 `smi-a` 保留；`smi-b-gpu-…` 没有设备。调度器在放置 Pod 之前完成了 GPU 分配。
 
-== Exercise 6: Two negative controls
+== 练习 6：两个负向验证
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m2-ex6.mp4[width=100%]
 
-The second pod asked for its own GPU, but the cluster has only one, and the first pod holds it.
+第二个 Pod 申请了自己的 GPU，但集群只有一块，第一个 Pod 已持有它。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -423,13 +365,9 @@ oc get events -n {gpu_namespace} --field-selector involvedObject.name=smi-b,reas
   -o jsonpath='{.items[-1:].message}{"\n"}'
 ----
 
-Expected result: `smi-b` is `Pending`, and the last `FailedScheduling` event reads `0/8 nodes are
-available: 3 node(s) had untolerated taint(s), 5 cannot allocate all claims. …` (the node counts
-depend on your cluster): three control-plane nodes are excluded by taints the pod does not
-tolerate, and on every other node, the GPU node included, no device can satisfy the claim. An exclusive claim really is exclusive: the scheduler will not place a
-second pod on a GPU that is already allocated.
+预期结果：`smi-b` 为 `Pending`，最后一条 `FailedScheduling` 事件显示 `0/8 nodes are available: 3 node(s) had untolerated taint(s), 5 cannot allocate all claims. …`（节点数取决于您的集群）：三个控制平面节点因 Pod 不容忍的污点而被排除，其余所有节点（包括 GPU 节点）都没有设备能满足该申请。独占申请确实是独占的：调度器不会将第二个 Pod 放置在已分配给其他 Pod 的 GPU 上。
 
-Now free the GPU and ask for a device that does not exist on this cluster, an H100:
+现在释放 GPU，并申请此集群上不存在的设备——H100：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -475,15 +413,12 @@ oc get events -n {gpu_namespace} --field-selector involvedObject.name=smi-h100,r
   -o jsonpath='{.items[-1:].message}{"\n"}'
 ----
 
-Expected result: `smi-h100` stays `Pending` even though the GPU is now free, with the same
-`cannot allocate all claims` reason: the only GPU's `productName` is `NVIDIA L4`, so the selector
-matches no device. Selectors are enforced by the scheduler, not by the workload.
+预期结果：即使 GPU 已释放，`smi-h100` 仍保持 `Pending` 状态，原因同样是 `cannot allocate all claims`：唯一 GPU 的 `productName` 是 `NVIDIA L4`，选择器无法匹配任何设备。选择器由调度器强制执行，而非由工作负载决定。
 
-.The scripted assertion for this exercise
+.此练习的脚本化断言
 [%collapsible]
 ====
-Run it while `smi-h100` still exists. It passes only if the pod is unscheduled because of its claim
-while the GPU is free.
+在 `smi-h100` 仍存在时运行。只有当 Pod 因申请不满足而未被调度（且 GPU 空闲）时，断言才通过。
 
 [source,bash,subs="attributes+"]
 ----
@@ -500,22 +435,21 @@ echo PASS
 ----
 ====
 
-Delete the pod that can never be scheduled:
+删除永远无法被调度的 Pod：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
 oc delete pod smi-h100 -n {gpu_namespace} --wait=true
 ----
 
-Expected result: `pod "smi-h100" deleted`.
+预期结果：`pod "smi-h100" deleted`。
 
-== Exercise 7: Share one GPU between two pods
+== 练习 7：两个 Pod 共享同一块 GPU
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m2-ex7.mp4[width=100%]
 
-A `ResourceClaim` created on its own (not from a template) is a single allocation. Every pod that
-names it gets the _same_ device.
+独立创建的 `ResourceClaim`（非由模板生成）是单次分配。每个命名该申请的 Pod 获得_相同_的设备。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -558,15 +492,11 @@ oc logs -n {gpu_namespace} share-a; oc logs -n {gpu_namespace} share-b
 oc get resourceclaim shared-l4 -n {gpu_namespace} -o jsonpath='device: {.status.allocation.devices.results[0].device}{"\n"}reserved for: {.status.reservedFor[*].name}{"\n"}'
 ----
 
-Expected result: both pods are Ready and print the same line, `GPU 0: NVIDIA L4 (UUID:
-GPU-…)`, with an identical UUID; the claim is allocated to `gpu-0` and reserved for `share-a
-share-b`. Sharing is a property of the claim, visible in the API, not a hidden node setting. Both
-processes share the GPU's memory and compute with no isolation between them, so each workload must
-be sized to leave room for the other (Day 2 does exactly this for two model replicas).
+预期结果：两个 Pod 均 Ready，打印相同内容 `GPU 0: NVIDIA L4 (UUID: GPU-…)`，UUID 完全相同；申请分配到 `gpu-0`，并为 `share-a share-b` 保留。共享是申请的属性，在 API 中可见，而非隐藏的节点设置。两个进程共享 GPU 的显存和算力，彼此之间没有隔离，因此每个工作负载必须为另一个留出空间（第 2 天将为两个模型副本执行同样的操作）。
 
-In short: template = one device per pod; standalone claim = one device for every pod that names it.
+简言之：模板 = 每个 Pod 独占一个设备；独立申请 = 命名该申请的所有 Pod 共享同一设备。
 
-Free the GPU for Module 3:
+释放 GPU，为模块 3 做准备：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -574,31 +504,24 @@ oc delete pod share-a share-b -n {gpu_namespace} --wait=true
 oc get resourceclaim shared-l4 -n {gpu_namespace} -o jsonpath='reserved for: [{.status.reservedFor[*].name}] device: [{.status.allocation.devices.results[0].device}]{"\n"}'
 ----
 
-Expected result: `reserved for: [] device: []`. The claim still exists, but once no pod reserves
-it, Kubernetes releases its allocation, so the GPU is free for the next claim.
+预期结果：`reserved for: [] device: []`。申请仍然存在，但一旦没有 Pod 保留它，Kubernetes 就会释放其分配，GPU 便可供下一个申请使用。
 
-== Evidence checkpoint
+== 检查点
 
-Before continuing, verify that you can answer:
+继续之前，请确认您能够回答以下问题：
 
-* What does a `ResourceSlice` tell the scheduler that `nvidia.com/gpu: 1` cannot?
-* Which object decides whether two pods share a GPU, and how?
-* Why did `smi-h100` stay `Pending` while the GPU was free?
-* What does the `NVIDIADriver` CR do that the `GPUCluster` CR does not, and the other way round?
+* `ResourceSlice` 向调度器提供了 `nvidia.com/gpu: 1` 无法提供的哪些信息？
+* 哪个对象决定两个 Pod 是否共享 GPU，以及如何决定？
+* 为什么 `smi-h100` 在 GPU 空闲时仍保持 `Pending`？
+* `NVIDIADriver` CR 和 `GPUCluster` CR 各自负责什么，不负责什么？
 
-.Answer key
+.参考答案
 [%collapsible]
 ====
-* Which device it is and what it offers: product name, architecture, memory, driver and CUDA
-  versions and PCI location, so a workload can select by property and the allocation records the
-  exact device.
-* The claim. Pods that reference one standalone `ResourceClaim` share its device; pods that
-  reference a `ResourceClaimTemplate` each get their own claim and their own device.
-* Its claim's CEL selector required an H100, and the only device's `productName` is `NVIDIA L4`, so
-  no device matched.
-* `NVIDIADriver` runs the driver container that loads the kernel modules on the GPU node.
-  `GPUCluster` runs the DRA kubelet plugin that discovers the GPUs through that driver and
-  publishes them as ResourceSlices (plus the DCGM exporter).
+* 设备是什么以及它提供什么：产品名、架构、显存、驱动和 CUDA 版本以及 PCI 位置，使工作负载可以按属性选择，并在分配中记录具体设备。
+* 申请（Claim）。引用同一独立 `ResourceClaim` 的 Pod 共享其设备；引用 `ResourceClaimTemplate` 的 Pod 各自获得独立申请和独立设备。
+* 其申请的 CEL 选择器要求 H100，而唯一设备的 `productName` 是 `NVIDIA L4`，所以没有设备匹配。
+* `NVIDIADriver` 在 GPU 节点上运行驱动容器，加载内核模块。`GPUCluster` 运行 DRA kubelet 插件，通过该驱动发现 GPU 并以 ResourceSlice 形式发布（以及 DCGM exporter）。
 ====
 
-Proceed to xref:05-module-03-onboard-model.adoc[Module 3: Onboard a model].
+继续 xref:05-module-03-onboard-model.adoc[模块 3：模型上线]。
