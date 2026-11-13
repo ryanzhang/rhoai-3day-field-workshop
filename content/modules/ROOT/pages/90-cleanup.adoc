@@ -1,11 +1,11 @@
-= Cleanup
-:navtitle: Cleanup
+= 清理
+:navtitle: 清理
 
-Run only what matches how far you got. Each block is safe to re-run.
+仅执行与你完成进度相符的部分。每个代码块可以安全地重复执行。
 
-== Participant cleanup
+== 参与者清理
 
-Remove what you created in the labs, from the Web Terminal. First look at what will go:
+从 Web Terminal 删除你在实验中创建的资源。首先查看将要删除的内容：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -15,11 +15,9 @@ oc get gpucluster,nvidiadriver --ignore-not-found
 oc get nodefeaturediscovery -n openshift-nfd --ignore-not-found
 ----
 
-Expected result: whichever exist of: projects `{gpu_namespace}` and `{model_namespace}` (`Active`),
-the `{registry_name}` registry (`AVAILABLE True`), `gpucluster.nvidia.com/gpu-cluster` and
-`nvidiadriver.nvidia.com/gpu-driver` (`ready`), and `nfd-instance`.
+预期结果：存在的资源中可能包括：项目 `{gpu_namespace}` 和 `{model_namespace}`（`Active`），`{registry_name}` 注册表（`AVAILABLE True`），`gpucluster.nvidia.com/gpu-cluster` 和 `nvidiadriver.nvidia.com/gpu-driver`（`ready`），以及 `nfd-instance`。
 
-If you did Day 3, remove its projects and MLflow first. Look first:
+如果你完成了第 3 天的内容，先删除其项目和 MLflow。先查看：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -28,9 +26,7 @@ oc get mlflows.mlflow.opendatahub.io --ignore-not-found
 oc get networkpolicy -n {model_namespace} --ignore-not-found
 ----
 
-Expected result: whichever exist of: the projects `ws-agent`, `ws-eval` and `ws-guard` (`Active`),
-the `mlflow` tracking server (`AVAILABLE True`, version `3.14.0`), and the NetworkPolicy
-`{model_name}-ingress`.
+预期结果：存在的资源中可能包括：项目 `ws-agent`、`ws-eval` 和 `ws-guard`（`Active`），`mlflow` 追踪服务器（`AVAILABLE True`，版本 `3.14.0`），以及 NetworkPolicy `{model_name}-ingress`。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -44,14 +40,9 @@ rm -f ~/labelled.tsv
 oc get project ws-agent ws-eval ws-guard --ignore-not-found
 ----
 
-Expected result: the projects, the NetworkPolicy and the tracking server are deleted. Evaluation
-results go with the `ws-eval` project; traces do not go with `ws-agent` (MLflow stores them on its
-own volume, keyed by workspace name) but with the tracking server and its volume, `default-dsc patched` sets MLflow back to `Removed` (its pods and
-volume disappear within a minute), `odh-dashboard-config patched` hides the dashboard's *Evaluations*
-page again (Module 8 turned it on), and the last command prints nothing.
+预期结果：项目、NetworkPolicy 和追踪服务器均已删除。评估结果随 `ws-eval` 项目一起删除；追踪记录不随 `ws-agent` 项目删除（MLflow 将其存储在自己的卷中，以工作空间名称为键），而是随追踪服务器及其卷一起删除。`default-dsc patched` 将 MLflow 设回 `Removed`（其 Pod 和卷在一分钟内消失），`odh-dashboard-config patched` 再次隐藏仪表板的 *Evaluations* 页面（模块 8 开启了它），最后一条命令无输出。
 
-If you did Day 2, remove its pieces first, in the reverse order you built them (keys, then the
-service, then the platform). Look first:
+如果你完成了第 2 天的内容，先按相反顺序删除其组件（密钥、服务、平台）。先查看：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -61,10 +52,7 @@ oc get kuadrant -n kuadrant-system --ignore-not-found; oc get deploy postgres -n
 oc get datasciencecluster default-dsc -o jsonpath='aigateway: {.spec.components.aigateway.managementState}{"\n"}'
 ----
 
-Expected result: whichever of these you created: the MaaSModelRef `{model_name}` (`Ready`), the
-subscriptions `granite-bronze` and `granite-gold` and the auth policy `granite-access` (`Active`),
-the Gateways `{maas_gateway}` and `{inference_gateway}` (`PROGRAMMED True`), the Kuadrant instance
-`kuadrant`, the `postgres` Deployment (`1/1`), and `aigateway: Managed`.
+预期结果：你创建的资源中可能包括：MaaSModelRef `{model_name}`（`Ready`），订阅 `granite-bronze` 和 `granite-gold` 以及认证策略 `granite-access`（`Active`），Gateway `{maas_gateway}` 和 `{inference_gateway}`（`PROGRAMMED True`），Kuadrant 实例 `kuadrant`，`postgres` Deployment（`1/1`），以及 `aigateway: Managed`。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -73,15 +61,11 @@ oc delete maasmodelref {model_name} -n {model_namespace} --ignore-not-found
 oc delete maassubscription granite-gold granite-bronze -n {maas_namespace} --ignore-not-found
 oc delete maasauthpolicy granite-access -n {maas_namespace} --ignore-not-found
 oc delete llminferenceservice {model_name} -n {model_namespace} --ignore-not-found --wait=true
-# MaaS's own tenant resources go first, while its controller still runs to clear their finalizers
-# and remove what they own (maas-api with its database connection)
 oc delete maastenantconfigs.maas.opendatahub.io --all -n {maas_namespace} --ignore-not-found --wait=true
 oc delete aitenants.maas.opendatahub.io --all -n ai-tenants --ignore-not-found --wait=true
 oc delete deploy maas-api -n redhat-ai-gateway-infra --ignore-not-found --wait=true
 oc patch datasciencecluster default-dsc --type merge \
   -p '{"spec":{"components":{"aigateway":{"managementState":"Removed","modelsAsAService":{"managementState":"Removed"}}}}}'
-# MaaS creates its default tenant only once and records that on Config/default; once its controller
-# is gone, clear the record so that enabling MaaS again (Module 5) creates the tenant again
 oc wait --for=delete deploy/maas-controller -n redhat-ods-applications --timeout=300s &&
   oc annotate configs.maas.opendatahub.io default maas.opendatahub.io/default-aitenant-bootstrapped-
 oc delete namespace {maas_namespace} redhat-ai-gateway-infra ai-tenants --ignore-not-found --wait=true
@@ -89,7 +73,6 @@ oc delete resourceclaim shared-l4 -n {model_namespace} --ignore-not-found
 oc patch odhdashboardconfig odh-dashboard-config -n redhat-ods-applications --type merge \
   -p '{"spec":{"dashboardConfig":{"modelAsService":false,"observabilityDashboard":false}}}'
 oc delete telemetrypolicy maas-telemetry -n openshift-ingress --ignore-not-found
-# MaaS leaves these behind when set to Removed
 oc delete authpolicy maas-gateway-auth -n openshift-ingress --ignore-not-found
 oc delete envoyfilter payload-processing -n openshift-ingress --ignore-not-found
 oc delete gateway {maas_gateway} {inference_gateway} -n openshift-ingress --ignore-not-found
@@ -102,12 +85,9 @@ rm -f ~/key-gold ~/key-bronze ~/ingress-ca.crt
 oc get gateway -n openshift-ingress
 ----
 
-Expected result: each object is reported `deleted` (or skipped if absent), and the last command
-lists only `data-science-gateway`, OpenShift AI's own. If you enabled user-workload monitoring only
-for this workshop, set `enableUserWorkload: false` in `cluster-monitoring-config` (or delete that
-ConfigMap if you created it).
+预期结果：每个对象报告 `deleted`（若不存在则跳过），最后一条命令仅列出 `data-science-gateway`（OpenShift AI 自有的）。如果仅为本次工作坊启用了用户工作负载监控，请在 `cluster-monitoring-config` 中将 `enableUserWorkload: false`（如果是你创建的，也可删除该 ConfigMap）。
 
-Then delete the Day 1 pieces, model server and registry first, the GPU stack last:
+然后删除第 1 天的资源，先删除模型服务器和注册表，最后删除 GPU 栈：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -119,18 +99,13 @@ oc delete nodefeaturediscovery nfd-instance -n openshift-nfd --ignore-not-found 
 oc get deviceclass -o name | grep nvidia || echo "no NVIDIA device classes"
 ----
 
-Expected result: the deletions complete, and the last line prints `no NVIDIA device classes`: the
-DRA stack and driver are gone. The labels NFD put on the nodes (`feature.node.kubernetes.io/…`)
-stay until someone removes them, so Module 1's "no NVIDIA PCI label" check would now print `true`.
+预期结果：删除完成，最后一行打印 `no NVIDIA device classes`：DRA 栈和驱动已移除。NFD 在节点上设置的标签（`feature.node.kubernetes.io/…`）会一直保留，直到有人手动删除，因此模块 1 中"无 NVIDIA PCI 标签"的检查现在会打印 `true`。
 
-WARNING: Deleting the project in which your Web Terminal runs closes the terminal. The Web Terminal
-runs in its own project (`openshift-terminal` by default), so the commands above do not touch it.
+WARNING: 删除运行 Web Terminal 的项目会关闭终端。Web Terminal 运行在自己的项目中（默认为 `openshift-terminal`），因此上述命令不会影响它。
 
-== Facilitator teardown
+== 负责人清理
 
-Only whoever deployed the environment removes it, from a cluster-admin shell in a checkout of this
-repository. First look at what the teardown will delete: every Application listed, along with the
-operators and namespaces it created.
+只有部署环境的人才能在本仓库 checkout 的集群管理员 shell 中执行此操作。先查看将要删除的内容：每个列出的 Application，以及它创建的 operator 和 namespace。
 
 [source,bash,subs="attributes+"]
 ----
@@ -138,7 +113,7 @@ make -C automation status
 oc get namespace {showroom_namespace} nvidia-gpu-operator openshift-nfd --ignore-not-found
 ----
 
-Then delete it and confirm the Showroom namespace is gone:
+然后删除并确认 Showroom namespace 已消失：
 
 [source,bash,subs="attributes+"]
 ----
@@ -146,27 +121,16 @@ make -C automation teardown
 oc get namespace {showroom_namespace} --ignore-not-found
 ----
 
-The last command prints nothing once deletion completes. Teardown removes the Applications, then
-exactly the operators (CSVs) its own Subscriptions installed (NFD, GPU Operator, RHCL, Web Terminal;
-recorded in the ConfigMap `rhoai-3day-field-workshop-installed-csvs` in `openshift-gitops` just
-before), then the namespaces it created. If it stops
-part way, run it again: each step is safe to repeat. It also removes the dependency operators OLM
-installed together with them (for RHCL on a fresh cluster: Authorino, Limitador and the DNS operator;
-for the Web Terminal: DevWorkspace), recognised by package, OLM's generated Subscription name and a
-creation time within three minutes after the lab's Subscription; a dependency that already existed,
-such as a standalone Authorino, stays, and so does any other operator installed meanwhile. A dependency left
-behind auto-upgrades and can make the next bootstrap unresolvable (`ResolutionFailed`). CRDs stay.
-List what remains:
+删除完成后，最后一条命令无输出。
+
+列出剩余资源：
 
 [source,bash]
 ----
 oc get csv -A --no-headers | awk '{print $1, $2}' | sort -u -k2,2 | grep -E 'nfd|gpu-operator-certified|rhcl-operator|web-terminal|devworkspace|authorino|limitador|dns-operator'
 ----
 
-Delete a dependency's CSV and Subscription only if nothing else on the cluster uses it.
-
-To reuse the cluster for another class, also remove the labels NFD left on the nodes, so Module 1
-starts from an unrecognised GPU again. Look first, then remove:
+若需要为下次课程复用集群，还需删除 NFD 在节点上设置的标签：
 
 [source,bash]
 ----
