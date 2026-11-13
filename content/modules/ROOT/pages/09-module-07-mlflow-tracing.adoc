@@ -1,64 +1,51 @@
-= Module 7: Trace an agent with MLflow
-:navtitle: Module 7: Trace an agent with MLflow
+= 模块 7：使用 MLflow 追踪 Agent
+:navtitle: 模块 7：使用 MLflow 追踪 Agent
 
-An agent is a loop: the model decides to call a tool, the code runs it, the result goes back to the
-model, and so on until it answers. When the answer is wrong or slow, a log line saying "200 OK" is
-useless. You need to see each step: what the model was asked, which tool it chose and with which
-arguments, what came back, how many tokens each call cost and where the time went. The customer
-question: _when an agent misbehaves in production, how do we see what it actually did?_
+Agent 是一个循环：模型决定调用工具，代码执行它，结果返回给模型，如此循环直到得出答案。当答案错误或响应缓慢时，日志中的"200 OK"毫无意义。你需要看到每一步：模型收到了什么问题，选择了哪个工具及其参数，返回了什么结果，每次调用消耗了多少 token，时间花在哪里。客户的问题：_当 Agent 在生产环境中出现异常行为时，我们如何查看它实际执行了什么？_
 
-In this module you enable MLflow on OpenShift AI, give an agent an identity that may write traces
-and nothing else, and run a small tool-calling agent against your MaaS model. Then you read its
-trace span by span.
+在本模块中，你将在 OpenShift AI 上启用 MLflow，为 Agent 配置一个只能写入追踪数据的身份，然后对你的 MaaS 模型运行一个小型工具调用 Agent。最后，你将逐 span 读取其追踪记录。
 
-.New to tracing?
+.初次接触追踪？
 [%collapsible]
 ====
-* *Trace* — the record of one request through an application: a tree of spans.
-* *Span* — one timed step inside a trace (an LLM call, a tool call, the agent loop itself), with its
-  inputs, outputs and attributes such as token counts.
-* *Autolog* — MLflow's instrumentation of a library (here the OpenAI SDK) so every call becomes a
-  span without changing the calling code.
-* *Experiment* — MLflow's container for runs and traces of one application.
-* *Workspace* — in OpenShift AI, MLflow's tenant boundary: one workspace per OpenShift project.
+* *Trace（追踪）* — 一个请求通过应用程序的完整记录：一棵 span 的树。
+* *Span（跨度）* — 追踪内的一个计时步骤（一次 LLM 调用、一次工具调用、Agent 循环本身），包含其输入、输出和属性（如 token 数量）。
+* *Autolog（自动日志）* — MLflow 对库（此处为 OpenAI SDK）的插桩，使每次调用都成为一个 span，无需修改调用代码。
+* *Experiment（实验）* — MLflow 用于管理一个应用程序的运行记录和追踪的容器。
+* *Workspace（工作空间）* — 在 OpenShift AI 中，MLflow 的租户边界：每个 OpenShift 项目对应一个工作空间。
 ====
 
-== Technical context
+== 技术背景
 
 [cols="1,3",options="header"]
 |===
-| Piece | Role
+| 组件 | 作用
 
-| `mlflowoperator` in the DataScienceCluster
-| installs the MLflow operator and its `MLflow` resource type
+| DataScienceCluster 中的 `mlflowoperator`
+| 安装 MLflow operator 及其 `MLflow` 资源类型
 
-| `MLflow` CR (`mlflow`)
-| one tracking server for the cluster, deployed into `redhat-ods-applications`, here with SQLite on a
-  persistent volume; served at `https://rh-ai.{cluster_domain}/mlflow` and in-cluster at
-  `https://mlflow.redhat-ods-applications.svc:8443/mlflow`
+| `MLflow` CR（`mlflow`）
+| 集群的一个追踪服务器，部署在 `redhat-ods-applications` 中，此处使用 SQLite 持久卷；通过 `https://rh-ai.{cluster_domain}/mlflow` 对外提供服务，集群内地址为 `https://mlflow.redhat-ods-applications.svc:8443/mlflow`
 
-| Workspaces and RBAC
-| every request names a workspace (an OpenShift project); MLflow checks the caller's Kubernetes RBAC
-  on virtual `mlflow.kubeflow.org` resources (experiments, datasets, registered models) in that project
+| 工作空间与 RBAC
+| 每个请求都指定一个工作空间（OpenShift 项目）；MLflow 检查调用者在该项目中对虚拟 `mlflow.kubeflow.org` 资源（experiments、datasets、registered models）的 Kubernetes RBAC 权限
 
-| The agent
-| a Python job using the OpenAI SDK against MaaS with your gold key; `mlflow.openai.autolog()` traces
-  every model call, and `@mlflow.trace` marks the agent loop and the tool
+| Agent
+| 一个使用 OpenAI SDK 通过 MaaS 金密钥调用的 Python 任务；`mlflow.openai.autolog()` 追踪每次模型调用，`@mlflow.trace` 标记 Agent 循环和工具
 |===
 
-The agent authenticates to MaaS with an API key and to MLflow with its ServiceAccount token: two
-different identities, governed by two different systems.
+Agent 使用 API 密钥向 MaaS 认证，使用 ServiceAccount token 向 MLflow 认证：两种不同的身份，由两个不同的系统管理。
 
-== Learning objectives
+== 学习目标
 
-* Enable MLflow and create a tracking server.
-* Explain how MLflow on OpenShift AI scopes data (workspaces) and authorizes callers (RBAC).
-* Show that an agent without MLflow rights cannot write traces, then grant exactly those rights.
-* Read an agent's trace: span types, the tool call's arguments and result, token usage and latency.
+* 启用 MLflow 并创建追踪服务器。
+* 解释 MLflow 在 OpenShift AI 上如何划分数据范围（工作空间）以及授权调用者（RBAC）。
+* 演示没有 MLflow 权限的 Agent 无法写入追踪，然后授予精确所需的权限。
+* 读取 Agent 的追踪记录：span 类型、工具调用的参数与结果、token 用量和延迟。
 
-== Exercise 1: Enable MLflow
+== 练习 1：启用 MLflow
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：在测试集群上运行本练习（等待时间已加速）
 video::m7-ex1.mp4[width=100%]
 
 [source,bash,role="execute"]
@@ -87,16 +74,14 @@ oc wait mlflows.mlflow.opendatahub.io/mlflow --for=condition=Available --timeout
 oc get mlflows.mlflow.opendatahub.io mlflow -o jsonpath='version {.status.version}, in-cluster {.status.address.url}{"\n"}'
 ----
 
-Expected result: `default-dsc patched`, `mlflow.mlflow.opendatahub.io/mlflow created`, a database
-migration job runs, and then `condition met` and `version 3.14.0, in-cluster
-https://mlflow.redhat-ods-applications.svc:8443/mlflow`.
+预期结果：`default-dsc patched`，`mlflow.mlflow.opendatahub.io/mlflow created`，数据库迁移任务运行，然后 `condition met` 以及 `version 3.14.0, in-cluster https://mlflow.redhat-ods-applications.svc:8443/mlflow`。
 
-== Exercise 2: How MLflow decides who sees what
+== 练习 2：MLflow 如何决定谁能访问什么
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：在测试集群上运行本练习（等待时间已加速）
 video::m7-ex2.mp4[width=100%]
 
-Ask the tracking API three ways: with no token, with your token but no workspace, and with both.
+以三种方式调用追踪 API：不带 token、带 token 但不指定工作空间、同时带 token 和工作空间。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -109,19 +94,16 @@ curl -s -w '\n' -H "Authorization: Bearer $(oc whoami -t)" "$ML/api/2.0/mlflow/e
 curl -s -w '\n' -H "Authorization: Bearer $(oc whoami -t)" -H 'X-MLFLOW-WORKSPACE: ws-agent' "$ML/api/2.0/mlflow/experiments/search?max_results=5"
 ----
 
-Expected result: `no token: 302` (a redirect to the OpenShift login); with a token but no workspace,
-`{"error":{"code":"INVALID_PARAMETER_VALUE","message":"Workspace context is required for this request."}}`;
-with the workspace `ws-agent`, `{}`: an empty workspace, which belongs to the project you just created.
+预期结果：`no token: 302`（重定向到 OpenShift 登录页面）；带 token 但无工作空间时，返回 `{"error":{"code":"INVALID_PARAMETER_VALUE","message":"Workspace context is required for this request."}}`；带工作空间 `ws-agent` 时，返回 `{}`：一个空工作空间，属于你刚创建的项目。
 
-In short: an MLflow workspace is an OpenShift project, and MLflow asks Kubernetes who may use it.
+简而言之：MLflow 工作空间就是一个 OpenShift 项目，MLflow 通过 Kubernetes 判断谁有权使用它。
 
-== Exercise 3: An agent without MLflow rights (negative control)
+== 练习 3：没有 MLflow 权限的 Agent（负控实验）
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：在测试集群上运行本练习（等待时间已加速）
 video::m7-ex3.mp4[width=100%]
 
-The agent consumes MaaS with your gold key from Day 2. Check that it still works, and mint a new one
-if it expired or your terminal lost it (the Web Terminal's home directory does not survive a restart):
+Agent 使用你在第 2 天生成的金密钥调用 MaaS。确认密钥仍然有效，如果已过期或终端丢失则重新生成（Web Terminal 的家目录重启后不会保留）：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -137,10 +119,9 @@ fi
 curl -s -o /dev/null -w 'gold key: %\{http_code}\n' -H "Authorization: Bearer $(cat ~/key-gold)" "$MAAS/maas-api/v1/models"
 ----
 
-Expected result: `gold key: 200` (preceded by `gold key not usable … minting a new one` if it had
-expired or was missing).
+预期结果：如果密钥已过期或丢失，会先显示 `gold key not usable … minting a new one`，然后显示 `gold key: 200`。
 
-Now give the agent an identity, the gold key and the ingress CA, and its code:
+现在为 Agent 创建身份、金密钥、Ingress CA 和代码：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -187,9 +168,9 @@ print("TOKENS", trace.info.token_usage)
 PY
 ----
 
-Expected result: the ServiceAccount, the Secret and the two ConfigMaps are created.
+预期结果：ServiceAccount、Secret 和两个 ConfigMap 创建成功。
 
-Now run the agent as a Job. The ServiceAccount has no RoleBinding yet:
+以 Job 方式运行 Agent。此时 ServiceAccount 还没有 RoleBinding：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -227,24 +208,19 @@ until [ -n "$(oc get job weather-agent -n ws-agent -o jsonpath='{.status.succeed
 oc logs job/weather-agent -n ws-agent | grep -o -E 'ANSWER:.*|TRACE .*|  SPAN .*|TOKENS .*|PERMISSION_DENIED|ERROR: .*' | cut -c1-200
 [ "$(oc get job weather-agent -n ws-agent -o jsonpath='{.status.succeeded}')" = 1 ] && echo "job: succeeded" || { echo "job: failed"; return 1; }
 }
-# on a re-run after Exercise 4, remove its RoleBinding so that this stays the negative control
+# 重新运行时，如果练习 4 的 RoleBinding 还在，先删除，确保此处仍为负控实验
 oc delete rolebinding weather-agent-mlflow -n ws-agent --ignore-not-found
 run_agent
 ----
 
-Expected result: the job fails: the log shows `PERMISSION_DENIED` (alone, or inside an `ERROR: …` line), from MLflow's answer
-(`RestException … {'error': {'code': 'PERMISSION_DENIED', …}}`) when the agent tries to create the
-experiment, followed by `job: failed`: the agent's ServiceAccount
-may call MaaS (it holds a key) but has no right to write to the `ws-agent` workspace.
+预期结果：Job 失败，日志显示 `PERMISSION_DENIED`（单独显示，或在 `ERROR: …` 行中），来自 MLflow 的响应（`RestException … {'error': {'code': 'PERMISSION_DENIED', …}}`），随后显示 `job: failed`：Agent 的 ServiceAccount 可以调用 MaaS（持有密钥），但无权向 `ws-agent` 工作空间写入数据。
 
-== Exercise 4: Grant exactly the rights to trace, and run again
+== 练习 4：授予精确的追踪权限后再次运行
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：在测试集群上运行本练习（等待时间已加速）
 video::m7-ex4.mp4[width=100%]
 
-OpenShift AI ships ClusterRoles for MLflow: `mlflow-operator-mlflow-view`, `-edit` and
-`-integration` (for applications that log experiments and traces). Bind the integration role in this
-project only:
+OpenShift AI 为 MLflow 提供了 ClusterRole：`mlflow-operator-mlflow-view`、`-edit` 和 `-integration`（供记录实验和追踪的应用使用）。在当前项目中绑定 integration 角色：
 
 [source,bash,role="execute"]
 ----
@@ -254,10 +230,7 @@ oc create rolebinding weather-agent-mlflow -n ws-agent \
 run_agent
 ----
 
-Expected result: the first line shows `["datasets","experiments","registeredmodels"]` with
-`["get","list","create","update"]` (the role's other rules only read gateway endpoints and MCP
-servers); then the agent answers from the tool's result (clear sky, about 14 °C, bring a jacket) and
-prints a trace such as:
+预期结果：第一行显示 `["datasets","experiments","registeredmodels"]` 和 `["get","list","create","update"]`（该角色的其他规则仅读取网关端点和 MCP 服务器）；然后 Agent 根据工具返回值给出答案（晴天，约 14°C，建议带外套），并打印类似如下的追踪信息：
 
 [source,text]
 ----
@@ -269,17 +242,16 @@ TRACE tr-… OK 6313 ms
 TOKENS {'input_tokens': 430, 'output_tokens': 81, 'total_tokens': 511}
 ----
 
-The model's two calls take almost all the time; the tool is instant. Your numbers will differ.
+模型的两次调用几乎占据了全部时间；工具调用几乎是即时的。你的数字会有所不同。
 
-In short: the trace shows the agent's reasoning loop as data: ask, call a tool, answer.
+简而言之：追踪将 Agent 的推理循环呈现为可查看的数据：提问、调用工具、给出答案。
 
-== Exercise 5: Read the trace back, from the API and in the dashboard
+== 练习 5：通过 API 和仪表板读取追踪记录
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：在测试集群上运行本练习（等待时间已加速）
 video::m7-ex5.mp4[width=100%]
 
-The job printed the trace from its own process. Read it back from MLflow as another client would,
-through the same REST API the MLflow UI uses, in the `ws-agent` workspace:
+Job 在自己的进程中打印了追踪记录。现在作为另一个客户端，通过 MLflow UI 使用的同一 REST API，从 `ws-agent` 工作空间读取它：
 
 [source,bash,role="execute"]
 ----
@@ -292,59 +264,45 @@ curl -s "${H[@]}" "$ML/api/2.0/mlflow/traces?experiment_ids=$EXP&max_results=5" 
   | jq -r '.traces[] | "\(.request_id)  \(.status)  \(.execution_time_ms) ms  \([.tags[] | select(.key == "mlflow.traceName") | .value][0])"'
 ----
 
-Expected result: one line per agent run (including runs from an earlier, deleted `ws-agent` project:
-traces live in MLflow's store, not in the project), the newest with the trace ID the job printed, `OK`, its
-duration in milliseconds and the trace name `agent`. The trace is stored in the cluster's MLflow,
-scoped to the `ws-agent` workspace.
+预期结果：每次 Agent 运行对应一行（包括来自已删除的 `ws-agent` 项目的运行：追踪存储在 MLflow 中，不随项目一起删除），最新的一行显示 Job 打印的追踪 ID、`OK`、以毫秒为单位的持续时间以及追踪名称 `agent`。追踪存储在集群的 MLflow 中，范围限定在 `ws-agent` 工作空间。
 
-Now open the same trace in the OpenShift AI dashboard:
+现在在 OpenShift AI 仪表板中查看同一追踪：
 
-. Open the dashboard (`https://rh-ai.{cluster_domain}`). If you enabled MLflow a moment ago, reload
-  the page once so the new menu entry appears.
-. In the left menu, open *Develop & train* → *Experiments*.
-. In the *Project* selector at the top, choose `ws-agent`. The experiment `weather-agent` is listed.
-. Open `weather-agent`, then the *Traces* tab.
+. 打开仪表板（`https://rh-ai.{cluster_domain}`）。如果刚才启用了 MLflow，刷新一次页面以显示新菜单项。
+. 在左侧菜单中，打开 *Develop & train* → *Experiments*。
+. 在顶部的 *Project* 选择器中，选择 `ws-agent`。实验 `weather-agent` 已列出。
+. 打开 `weather-agent`，然后切换到 *Traces* 标签。
 
-image::09-mlflow-traces.png[The Traces tab of the weather-agent experiment, one row with the question, the answer, 522 tokens, 6.503 s and state OK]
+image::09-mlflow-traces.png[weather-agent 实验的 Traces 标签，一行显示问题、答案、522 个 token、6.503 秒和状态 OK]
 
-Expected result: one row per run, with *Trace ID* `tr-…`, *Request* `{ "question": "Should I bring a
-jacket in Seoul today?" }`, the *Response*, *Tokens* (about 520), *Execution time* (about 6.5 s) and
-*State* `OK`.
+预期结果：每次运行对应一行，包含 *Trace ID* `tr-…`、*Request* `{ "question": "Should I bring a jacket in Seoul today?" }`、*Response*、*Tokens*（约 520）、*Execution time*（约 6.5 秒）和 *State* `OK`。
 
-. Click the trace ID. The *Summary* tab shows *Status* `OK`, the *Token count* and *Latency*, the
-  question, the three steps *Completions was called*, *get_weather was called* and *Completions was
-  called* with their durations, and the answer.
+. 点击追踪 ID。*Summary* 标签显示 *Status* `OK`、*Token count* 和 *Latency*，以及问题、三个步骤（*Completions was called*、*get_weather was called* 和 *Completions was called*）及其持续时间，最后是答案。
 
-image::09-mlflow-trace-summary.png[The trace summary: status OK, token count 522, latency 6.50 s, two Completions calls with get_weather between them, and the final answer]
+image::09-mlflow-trace-summary.png[追踪摘要：状态 OK，token 数量 522，延迟 6.50 秒，两次 Completions 调用夹着 get_weather，最终答案]
 
-. Open the *Details & Timeline* tab and select `get_weather` in the *Trace breakdown* tree.
+. 打开 *Details & Timeline* 标签，在 *Trace breakdown* 树中选择 `get_weather`。
 
-image::09-mlflow-tool-span.png[The Details and Timeline tab with get_weather selected: input city Seoul, outputs city Seoul, sky clear, celsius 14]
+image::09-mlflow-tool-span.png[Details and Timeline 标签，选中 get_weather：输入城市首尔，输出城市首尔、天气晴朗、温度 14 摄氏度]
 
-Expected result: the *Trace breakdown* tree is `agent` → `Completions`, `get_weather`, `Completions`;
-the `get_weather` span's *Inputs / Outputs* show input `city: Seoul` and outputs `city: Seoul`,
-`sky: clear`, `celsius: 14`. You can see exactly which tool the model chose, with which argument, and
-what it got back, without adding a single log line to the agent.
+预期结果：*Trace breakdown* 树为 `agent` → `Completions`、`get_weather`、`Completions`；`get_weather` span 的 *Inputs / Outputs* 显示输入 `city: Seoul`，输出 `city: Seoul`、`sky: clear`、`celsius: 14`。你可以精确看到模型选择了哪个工具、使用了什么参数、得到了什么返回值，而无需在 Agent 中添加任何日志代码。
 
-== Evidence checkpoint
+== 验证检查点
 
-Before continuing, verify that you can answer:
+继续之前，确保你能回答以下问题：
 
-* What is an MLflow workspace on OpenShift AI, and what decides whether a caller may use it?
-* Why did the first run fail, although the agent could reach both MaaS and MLflow?
-* Which spans make up the agent's trace, and what does each record?
-* Which identity does the agent use for MaaS, and which for MLflow?
+* OpenShift AI 上的 MLflow 工作空间是什么，什么决定了调用者是否可以使用它？
+* 第一次运行为什么失败，尽管 Agent 可以访问 MaaS 和 MLflow？
+* Agent 的追踪由哪些 span 组成，每个 span 记录什么？
+* Agent 使用哪个身份访问 MaaS，哪个身份访问 MLflow？
 
-.Answer key
+.答案
 [%collapsible]
 ====
-* An OpenShift project; MLflow checks the caller's Kubernetes RBAC on `mlflow.kubeflow.org`
-  resources (experiments, datasets, registered models) in that project.
-* Its ServiceAccount had no RoleBinding in `ws-agent`, so MLflow refused to create the experiment
-  (`PERMISSION_DENIED`).
-* `AGENT` (the whole loop), two `CHAT_MODEL` spans (the model calls, recorded by autolog with their
-  messages and token usage) and a `TOOL` span (`get_weather`, with its arguments and result).
-* A MaaS API key (gold subscription) for the model; its Kubernetes ServiceAccount token for MLflow.
+* 一个 OpenShift 项目；MLflow 检查调用者在该项目中对 `mlflow.kubeflow.org` 资源（experiments、datasets、registered models）的 Kubernetes RBAC 权限。
+* 其 ServiceAccount 在 `ws-agent` 中没有 RoleBinding，因此 MLflow 拒绝创建实验（`PERMISSION_DENIED`）。
+* `AGENT`（整个循环）、两个 `CHAT_MODEL` span（由 autolog 记录的模型调用，包含消息和 token 用量）和一个 `TOOL` span（`get_weather`，包含参数和结果）。
+* 使用 MaaS API 密钥（金订阅）访问模型；使用 Kubernetes ServiceAccount token 访问 MLflow。
 ====
 
-Proceed to xref:10-module-08-evalhub.adoc[Module 8: Evaluate with EvalHub].
+继续至 xref:10-module-08-evalhub.adoc[模块 8：使用 EvalHub 评估模型]。
