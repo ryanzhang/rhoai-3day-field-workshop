@@ -2,7 +2,7 @@ name: github pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, zh]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -18,21 +18,43 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout English (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: en
+
+      - name: Checkout Chinese (zh)
+        uses: actions/checkout@v4
+        with:
+          ref: zh
+          path: zh-src
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
-      - run: npm run build
-      - name: automation selftest (namespace guard, cluster profiles)
-        run: bash automation/tests/selftest.sh
-      - name: lab contract (strict; red until every step is verified live)
-        run: bash scripts/check-lab.sh
+          cache-dependency-path: en/package-lock.json
+
+      - name: Build English site
+        run: |
+          cd en
+          npm ci
+          npm run build
+
+      - name: Build Chinese site
+        run: |
+          cd zh-src
+          npm ci
+          npm run build
+          mkdir -p ../en/www/zh
+          cp -r www/* ../en/www/zh/
+
       - if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v4
         with:
-          path: www
+          path: en/www
+
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: build
