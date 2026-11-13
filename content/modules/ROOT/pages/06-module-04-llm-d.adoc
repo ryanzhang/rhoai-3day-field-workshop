@@ -1,81 +1,79 @@
-= Module 4: llm-d, from one server to an inference pool
-:navtitle: Module 4: llm-d
+= 模块 4：llm-d，从单一服务器到推理资源池
+:navtitle: 模块 4：llm-d
 
-One vLLM server is fine until traffic grows. Then you add replicas, and a new question appears:
-_which replica should serve this request?_ A round-robin load balancer does not know that one
-replica already holds a long shared prompt in its KV cache, or that another has a queue. llm-d
-puts a scheduler in front of the replicas that does know, by reading each server's live state. The
-customer question: _what does llm-d add over plain vLLM, and how can I see it working?_
+一台 vLLM 服务器在流量增长之前还算够用。当你增加副本时，新问题随之而来：
+_哪个副本应该处理这个请求？_ 轮询负载均衡器并不知道某个副本已经在其 KV cache 中缓存了一段较长的共享 prompt，
+也不知道另一个副本的队列是否已满。llm-d 在副本前面放置了一个调度器，
+它会通过读取每台服务器的实时状态来做出智能决策。客户的问题是：
+_与普通 vLLM 相比，llm-d 增加了什么价值？我怎么能看到它实际运行的效果？_
 
-In this module you replace Day 1's single server with two replicas of the same model sharing the
-one GPU, put llm-d's scheduler in front of them, and watch it route requests by prompt prefix. You
-also find out what the deployment does, and does not, protect yet.
+在本模块中，你将把第 1 天的单一服务器替换为共享同一块 GPU 的两个副本，
+在它们前面放置 llm-d 的调度器，并观察它按照 prompt 前缀路由请求。
+你还将了解这种部署方式目前能保护什么、不能保护什么。
 
-.New to llm-d?
+.第一次接触 llm-d？
 [%collapsible]
 ====
-* *LLMInferenceService* — the KServe resource for llm-d deployments: model, replicas, and a
-  `router` (gateway, route, scheduler).
-* *InferencePool* — a Gateway API Inference Extension object: the set of model-server pods one
-  route sends traffic to.
-* *EPP (endpoint picker)* — llm-d's scheduler; for every request it scores each pod of the pool and
-  tells the gateway which one to use.
-* *Prefix cache* — vLLM's reuse of KV-cache blocks for prompt prefixes it has already processed;
-  a hit skips recomputing those tokens.
-* *Gateway API* — the Kubernetes routing API (`Gateway`, `HTTPRoute`); OpenShift implements it with
-  an Envoy-based gateway controller.
+* *LLMInferenceService* — llm-d 部署的 KServe 资源：模型、副本数，以及一个
+  `router`（网关、路由、调度器）。
+* *InferencePool* — Gateway API Inference Extension 对象：一条路由将流量发送到的模型服务器 Pod 集合。
+* *EPP（endpoint picker，端点选择器）* — llm-d 的调度器；对每个请求，它为资源池中的每个 Pod 打分，
+  并告知网关使用哪一个。
+* *Prefix cache（前缀缓存）* — vLLM 对已处理过的 prompt 前缀复用 KV cache 块的机制；
+  命中缓存可以跳过重新计算这些 token。
+* *Gateway API* — Kubernetes 路由 API（`Gateway`、`HTTPRoute`）；OpenShift 通过
+  基于 Envoy 的网关控制器实现它。
 ====
 
-== Technical context
+== 技术背景
 
-The request path after this module:
+本模块完成后的请求路径：
 
 [cols="1,3",options="header"]
 |===
-| Hop | What happens
+| 跳转点 | 发生了什么
 
 | Route `inference.{cluster_domain}`
-| the OpenShift router passes the connection to the gateway's Service
+| OpenShift router 将连接传递给网关的 Service
 
-| Gateway `{inference_gateway}` (Envoy)
-| matches the `HTTPRoute` KServe created for your model (path `/{model_namespace}/{model_name}`)
+| Gateway `{inference_gateway}`（Envoy）
+| 匹配 KServe 为你的模型创建的 `HTTPRoute`（路径 `/{model_namespace}/{model_name}`）
 
-| EPP (`{model_name}-kserve-router-scheduler`)
-| scores every pod of the `InferencePool` and names one
+| EPP（`{model_name}-kserve-router-scheduler`）
+| 为 `InferencePool` 中的每个 Pod 打分并指定一个
 
-| vLLM pod
-| serves the request; its prefix cache is warm or cold depending on that choice
+| vLLM Pod
+| 处理请求；其前缀缓存根据选择是热是冷
 |===
 
-The EPP's score is a weighted sum of plug-in scorers: queue length, KV-cache utilisation, an
-approximate prefix-cache match, and a least-recently-used tie-breaker for prompts no pod has seen.
-Both replicas share one L4 through a single `ResourceClaim`, exactly as `share-a` and `share-b` did
-in Module 2. Each replica is sized to fit in half of the GPU: `--gpu-memory-utilization=0.40`
-passes vLLM's start-up memory check, and `--kv-cache-memory-bytes=3G` gives each a fixed KV cache
-instead of letting the first replica claim everything. The model is a hybrid (Mamba) model, so
-prefix caching must be switched on explicitly with `--enable-prefix-caching`.
+EPP 的评分是多个插件评分器的加权总和：队列长度、KV cache 利用率、近似前缀缓存匹配，
+以及针对无 Pod 曾处理过的 prompt 的最近最少使用（LRU）打破平局机制。
+两个副本通过单个 `ResourceClaim` 共享一块 L4 GPU，与模块 2 中的 `share-a` 和 `share-b` 完全一样。
+每个副本被调整为占用 GPU 内存的一半：`--gpu-memory-utilization=0.40` 通过 vLLM 的启动内存检查，
+`--kv-cache-memory-bytes=3G` 为每个副本提供固定的 KV cache，
+而不是让第一个副本占用所有内存。该模型是混合（Mamba）模型，
+因此必须使用 `--enable-prefix-caching` 显式开启前缀缓存。
 
 // NOT-IN-DOCS: two vLLM processes sharing one GPU through a shared DRA claim is not an OpenShift AI
 // documented configuration; it is used because the workshop cluster has one GPU.
-NOTE: Two replicas on one GPU share its memory and compute with no isolation. It is done here so
-the scheduler has more than one endpoint to choose from on a one-GPU cluster; production pools
-give each replica its own GPU or MIG slice.
+NOTE: 两个副本共享一块 GPU 的内存和算力，没有任何隔离。这样做是为了让调度器在单 GPU 集群上
+有多个端点可选择；生产环境中，每个副本应拥有独立的 GPU 或 MIG 分片。
 
-== Learning objectives
+== 学习目标
 
-* Free a GPU held by an exclusive claim, and give it to two replicas through a shared claim.
-* Deploy an `LLMInferenceService` with llm-d's scheduler, and create the Gateway it routes through.
-* Name the objects KServe generates and the EPP's scorers and weights.
-* Show from vLLM's own metrics that the EPP keeps a prompt family on the replica with its prefix cached.
-* Show that a policy object is not enforcement, and that the pool survives losing a replica.
+* 释放被独占 claim 持有的 GPU，并通过共享 claim 将其分配给两个副本。
+* 部署带有 llm-d 调度器的 `LLMInferenceService`，并创建其路由的 Gateway。
+* 说出 KServe 生成的各对象及 EPP 的评分器和权重。
+* 通过 vLLM 自身的指标，证明 EPP 将同一 prompt 系列保留在已缓存其前缀的副本上。
+* 证明策略对象不等于强制执行，且资源池在丢失副本后能恢复。
 
-== Exercise 1: Free the GPU
+== 练习 1：释放 GPU
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m4-ex1.mp4[width=100%]
 
-Day 1's InferenceService holds the GPU through an exclusive claim. Two new replicas cannot start
-while it does. Delete it and watch the claim go:
+第 1 天的 InferenceService 通过独占 claim 持有 GPU，两个新副本在此期间无法启动。
+删除它并观察 claim 随之消失：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -85,14 +83,14 @@ until [ -z "$(oc get resourceclaims -n {model_namespace} -o name | grep {model_n
 oc get resourceclaims -n {model_namespace}
 ----
 
-Expected result: `inferenceservice.serving.kserve.io "{model_name}" deleted`; the first listing may
-still show the predictor's claim `allocated,reserved` while its pod terminates, and the second
-prints `No resources found in {model_namespace} namespace.` (or, if you are repeating this module,
-only `shared-l4`): the claim created from the template went with its pod, so the GPU is free.
+预期结果：`inferenceservice.serving.kserve.io "{model_name}" deleted`；
+第一次列出时，predictor 的 claim 可能仍显示为 `allocated,reserved`（其 Pod 正在终止中），
+第二次则打印 `No resources found in {model_namespace} namespace.`
+（若重复运行本模块，仅剩 `shared-l4`）：从模板创建的 claim 随其 Pod 一起消失，GPU 已释放。
 
-== Exercise 2: Deploy two replicas behind the scheduler
+== 练习 2：在调度器后部署两个副本
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m4-ex2.mp4[width=100%]
 
 [source,yaml,subs="attributes+"]
@@ -113,11 +111,11 @@ spec:
       - name: VLLM_ADDITIONAL_ARGS               # <5>
         value: "{vllm_shared_args}"
 ----
-<1> *replicas* — two vLLM pods for the scheduler to choose between.
-<2> *gateway: {}* — attach to OpenShift AI's default inference gateway, `openshift-ingress/{inference_gateway}`.
-<3> *scheduler: {}* — deploy llm-d's endpoint picker and an InferencePool; without it the route balances blindly.
-<4> *resourceClaimName* — both pods name the same standalone claim, so they share the one GPU.
-<5> *VLLM_ADDITIONAL_ARGS* — appended to the `vllm serve` command KServe's template builds; sizing and prefix caching as explained above.
+<1> *replicas* — 两个 vLLM Pod，供调度器从中选择。
+<2> *gateway: {}* — 连接到 OpenShift AI 的默认推理网关 `openshift-ingress/{inference_gateway}`。
+<3> *scheduler: {}* — 部署 llm-d 的 endpoint picker 和一个 InferencePool；缺少它，路由将盲目均衡。
+<4> *resourceClaimName* — 两个 Pod 引用同一个独立 claim，共享同一块 GPU。
+<5> *VLLM_ADDITIONAL_ARGS* — 附加到 KServe 模板构建的 `vllm serve` 命令后；如上所述进行内存调整和前缀缓存配置。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -166,20 +164,18 @@ oc get llminferenceservice {model_name} -n {model_namespace} \
   -o jsonpath='{range .status.conditions[?(@.type=="RouterReady")]}{.reason}: {.message}{"\n"}\{end}'
 ----
 
-NOTE: The router reports an error. This is expected: KServe looks for a Gateway that does not exist
-yet, and the next exercise creates it.
+NOTE: router 报告错误，这是预期行为：KServe 找不到尚不存在的 Gateway，下一个练习将创建它。
 
-Expected result: `RefsInvalid: Managed HTTPRoute references non-existent Gateway
-openshift-ingress/{inference_gateway}`. The workload is already starting; only the route has
-nowhere to attach.
+预期结果：`RefsInvalid: Managed HTTPRoute references non-existent Gateway
+openshift-ingress/{inference_gateway}`。工作负载已开始启动；只是路由还没有可以附加的地方。
 
-== Exercise 3: Create the inference gateway
+== 练习 3：创建推理网关
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m4-ex3.mp4[width=100%]
 
-The gateway follows the same pattern as OpenShift AI's own dashboard gateway: a ClusterIP Service
-whose certificate comes from the service CA, exposed through an OpenShift Route.
+该网关遵循与 OpenShift AI 自己的 dashboard 网关相同的模式：
+一个 ClusterIP Service，其证书来自 service CA，并通过 OpenShift Route 对外暴露。
 
 [source,yaml,subs="attributes+"]
 ----
@@ -194,10 +190,10 @@ spec:
     allowedRoutes: {namespaces: {from: All}}            # <3>
     tls: {certificateRefs: [{name: {inference_gateway}-tls}]}           # <4>
 ----
-<1> *gatewayClassName* — the class OpenShift AI installs, served by OpenShift's Envoy gateway controller.
-<2> *parametersRef* — a ConfigMap that shapes the generated Service: ClusterIP, with a service-CA certificate annotation.
-<3> *allowedRoutes* — accept HTTPRoutes from any namespace, including `{model_namespace}`.
-<4> *certificateRefs* — the certificate the service CA writes for that Service.
+<1> *gatewayClassName* — OpenShift AI 安装的类，由 OpenShift 的 Envoy 网关控制器提供服务。
+<2> *parametersRef* — 一个 ConfigMap，用于配置生成的 Service：ClusterIP 类型，带有 service-CA 证书注解。
+<3> *allowedRoutes* — 接受来自任意命名空间（包括 `{model_namespace}`）的 HTTPRoute。
+<4> *certificateRefs* — service CA 为该 Service 写入的证书。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -252,20 +248,21 @@ oc get llminferenceservice {model_name} -n {model_namespace} -o jsonpath='{.stat
 oc get pods,inferencepool,httproute -n {model_namespace}
 ----
 
-Expected result: the Gateway reports `condition met` for `Programmed`, and after a few minutes the
-LLMInferenceService reports `condition met` for `Ready`. Its URL is
-`https://inference.{cluster_domain}/{model_namespace}/{model_name}`. The project now holds two
-`{model_name}-kserve-…` pods (`2/2`), one `{model_name}-kserve-router-scheduler-…` pod, the
-InferencePool `{model_name}-inference-pool` and the HTTPRoute `{model_name}-kserve-route`.
+预期结果：Gateway 对 `Programmed` 条件报告 `condition met`，
+几分钟后 LLMInferenceService 对 `Ready` 条件报告 `condition met`。
+其 URL 为 `https://inference.{cluster_domain}/{model_namespace}/{model_name}`。
+项目中现在有两个 `{model_name}-kserve-…` Pod（`2/2`）、
+一个 `{model_name}-kserve-router-scheduler-…` Pod、
+InferencePool `{model_name}-inference-pool` 和 HTTPRoute `{model_name}-kserve-route`。
 
-In short: you wrote one resource; KServe generated the pool, the scheduler and the route.
+简而言之：你只写了一个资源，KServe 生成了资源池、调度器和路由。
 
-== Exercise 4: Read the scheduler's configuration
+== 练习 4：读取调度器的配置
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m4-ex4.mp4[width=100%]
 
-The EPP receives its whole configuration as an argument. Read the scorers and their weights:
+EPP 通过参数接收其完整配置。读取评分器及其权重：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -273,18 +270,19 @@ oc get deploy {model_name}-kserve-router-scheduler -n {model_namespace} \
   -o jsonpath='{.spec.template.spec.containers[0].args[1]}' | sed -n '/schedulingProfiles/,$p'
 ----
 
-Expected result: one scheduling profile, `default`, with `queue-scorer` weight 2,
-`kv-cache-utilization-scorer` weight 2, `prefix-cache-scorer` weight 3, `no-hit-lru-scorer`
-weight 2, and the `max-score-picker`. Prefix affinity carries the most weight, but a long queue or
-a full KV cache can outvote it.
+预期结果：一个名为 `default` 的调度配置文件，`queue-scorer` 权重为 2，
+`kv-cache-utilization-scorer` 权重为 2，`prefix-cache-scorer` 权重为 3，
+`no-hit-lru-scorer` 权重为 2，以及 `max-score-picker`。
+前缀亲和性权重最高，但较长的队列或已满的 KV cache 也可以超过它。
 
-== Exercise 5: An open door (negative control)
+== 练习 5：一扇敞开的门（负控制）
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m4-ex5.mp4[width=100%]
 
-KServe also created an AuthPolicy (a Red Hat Connectivity Link object) that should require an
-OpenShift token on this gateway. Try the endpoint without one, then read the policy's status:
+KServe 还创建了一个 AuthPolicy（Red Hat Connectivity Link 对象），
+应要求在此网关上使用 OpenShift token。先不带 token 尝试访问端点，
+然后读取策略状态：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -296,17 +294,17 @@ oc get authpolicy -n openshift-ingress {inference_gateway}-authn \
   -o jsonpath='{range .status.conditions[*]}{.type}={.status}: {.message}{"\n"}\{end}'
 ----
 
-Expected result: `anonymous: 200`: anyone can call the model. The AuthPolicy is
-`Accepted=True` but `Enforced=False: kuadrant is not installed, please create resource`. A policy
-object is only a request; Module 5 installs the Kuadrant instance that enforces it.
+预期结果：`anonymous: 200`——任何人都可以调用该模型。
+AuthPolicy 状态为 `Accepted=True`，但 `Enforced=False: kuadrant is not installed, please create resource`。
+策略对象只是一个声明；模块 5 将安装用于强制执行的 Kuadrant 实例。
 
-== Exercise 6: Watch the scheduler route by prefix
+== 练习 6：观察调度器按前缀路由
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m4-ex6.mp4[width=100%]
 
-Send two families of requests, each with its own long system prompt (about 1,500 tokens), five
-times each, and compare each replica's vLLM counters before and after.
+发送两组请求，每组使用各自的长系统提示（约 1,500 个 token），各发送 5 次，
+并对比前后每个副本的 vLLM 计数器。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -330,19 +328,19 @@ done
 echo "AFTER"; counters
 ----
 
-Expected result: ten `200`s. Between BEFORE and AFTER, each replica's `requests` grows by exactly
-5, and each replica's `prefix_cache_hits` grows by about 4,096 tokens: the first request of a
-family misses, the next four reuse its cached prefix. The scheduler kept each family on one
-replica and sent the new family to the other.
+预期结果：10 个 `200` 响应。在 BEFORE 和 AFTER 之间，每个副本的 `requests` 恰好增加 5，
+每个副本的 `prefix_cache_hits` 增加约 4,096 个 token：
+每组的第一个请求未命中缓存，后续四个复用其已缓存的前缀。
+调度器将每组请求保持在同一个副本上，并将新的一组发送到另一个副本。
 
-In short: llm-d turns a pool of servers into one cache-aware service.
+简而言之：llm-d 将一组服务器变成了一个感知缓存的统一服务。
 
-== Exercise 7: Lose a replica (break and restore)
+== 练习 7：丢失一个副本（故障与恢复）
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m4-ex7.mp4[width=100%]
 
-Delete one replica while sending requests, then watch it come back:
+在发送请求的同时删除一个副本，然后观察它恢复：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -359,32 +357,31 @@ oc get pod "$VICTIM" -n {model_namespace} -o name 2>/dev/null || echo "$VICTIM i
 oc get resourceclaim shared-l4 -n {model_namespace} -o jsonpath='reserved for: {.status.reservedFor[*].name}{"\n"}'
 ----
 
-Expected result: ten `200`s while one replica is gone; the EPP only routes to pods that are ready.
-After two to three minutes the loop ends with two workload pods `2/2 Running`: the survivor and a
-replacement with a new name; the deleted pod prints `… is gone`; and `reserved for:` names those two
-pods, sharing the claim. The pool is back to two ready replicas.
+预期结果：在一个副本消失期间收到 10 个 `200` 响应；EPP 只将请求路由到就绪的 Pod。
+两到三分钟后，循环结束，显示两个工作负载 Pod 处于 `2/2 Running` 状态：
+存活的副本和一个带新名称的替代副本；已删除的 Pod 打印 `… is gone`；
+`reserved for:` 列出这两个 Pod 的名称，共享该 claim。
+资源池已恢复到两个就绪副本的状态。
 
-== Evidence checkpoint
+== 检查点
 
-Before continuing, verify that you can answer:
+继续之前，请验证你能回答以下问题：
 
-* Which objects did KServe generate from your `LLMInferenceService`, and what does each do?
-* What evidence shows the scheduler routed by prefix rather than at random?
-* Why did the anonymous call succeed although an AuthPolicy exists?
-* Why do the two replicas need `--gpu-memory-utilization` and `--kv-cache-memory-bytes` here?
+* KServe 从你的 `LLMInferenceService` 生成了哪些对象，每个对象的作用是什么？
+* 有什么证据表明调度器是按前缀路由，而不是随机路由？
+* 为什么匿名调用成功，尽管 AuthPolicy 已存在？
+* 为什么两个副本在此处需要 `--gpu-memory-utilization` 和 `--kv-cache-memory-bytes`？
 
-.Answer key
+.参考答案
 [%collapsible]
 ====
-* The vLLM Deployment (the pods), the EPP Deployment (`…-router-scheduler`), the InferencePool (the
-  pods the route targets) and the HTTPRoute (the path on the gateway), plus an AuthPolicy on the
-  gateway.
-* Each family's five requests all landed on one replica (`requests` +5 on each), and that replica's
-  `prefix_cache_hits` rose by about 4,096 tokens: four warm hits after one cold miss.
-* Nothing enforces it: its status says `Enforced=False` because no Kuadrant instance exists.
-* They share one GPU. Without a lower utilisation target the second replica fails vLLM's start-up
-  free-memory check, and without a fixed KV-cache size the first replica would take the memory the
-  second needs.
+* vLLM Deployment（Pod）、EPP Deployment（`…-router-scheduler`）、InferencePool（路由的目标 Pod 集合）
+  和 HTTPRoute（网关上的路径），以及网关上的 AuthPolicy。
+* 每组的 5 个请求全部落在同一个副本上（每个副本 `requests` +5），
+  且该副本的 `prefix_cache_hits` 增加了约 4,096 个 token：一次冷未命中，四次热命中。
+* 没有任何强制执行：其状态显示 `Enforced=False`，因为不存在 Kuadrant 实例。
+* 它们共享一块 GPU。如果不降低利用率目标，第二个副本会在 vLLM 启动时的空闲内存检查中失败；
+  如果不设置固定的 KV cache 大小，第一个副本会占用第二个副本所需的内存。
 ====
 
-Proceed to xref:07-module-05-maas-standup.adoc[Module 5: Stand up Models-as-a-Service].
+继续前往 xref:07-module-05-maas-standup.adoc[模块 5：搭建 Models-as-a-Service]。
