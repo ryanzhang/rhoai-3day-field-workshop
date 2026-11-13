@@ -1,25 +1,25 @@
-* xref:index.adoc[Introduction]
-* xref:01-overview.adoc[Architecture and Control Boundaries]
-* xref:02-details.adoc[Prerequisites and Environment]
+* xref:index.adoc[简介]
+* xref:01-overview.adoc[架构与控制边界]
+* xref:02-details.adoc[前提条件与环境]
 
-.Day 1: GPU to served model (90 minutes)
-* xref:03-module-01-your-cluster.adoc[Module 1: Your cluster]
-* xref:04-module-02-gpus-dra.adoc[Module 2: GPUs the DRA way]
-* xref:05-module-03-onboard-model.adoc[Module 3: Onboard a model]
+.第一天：从 GPU 到模型服务（90 分钟）
+* xref:03-module-01-your-cluster.adoc[模块 1：你的集群]
+* xref:04-module-02-gpus-dra.adoc[模块 2：DRA 方式使用 GPU]
+* xref:05-module-03-onboard-model.adoc[模块 3：接入模型]
 
-.Day 2: model to governed service (185 minutes)
-* xref:06-module-04-llm-d.adoc[Module 4: llm-d]
-* xref:07-module-05-maas-standup.adoc[Module 5: Stand up MaaS]
-* xref:08-module-06-maas-govern.adoc[Module 6: Govern and consume MaaS]
+.第二天：从模型到受治理的服务（185 分钟）
+* xref:06-module-04-llm-d.adoc[模块 4：llm-d]
+* xref:07-module-05-maas-standup.adoc[模块 5：搭建 MaaS]
+* xref:08-module-06-maas-govern.adoc[模块 6：治理与使用 MaaS]
 
-.Day 3: service to trusted application (125 minutes)
-* xref:09-module-07-mlflow-tracing.adoc[Module 7: Trace an agent with MLflow]
-* xref:10-module-08-evalhub.adoc[Module 8: Evaluate with EvalHub]
-* xref:11-module-09-guardrails.adoc[Module 9: Guard it with NeMo Guardrails]
+.第三天：从服务到可信应用（125 分钟）
+* xref:09-module-07-mlflow-tracing.adoc[模块 7：用 MLflow 追踪 Agent]
+* xref:10-module-08-evalhub.adoc[模块 8：用 EvalHub 进行评测]
+* xref:11-module-09-guardrails.adoc[模块 9：用 NeMo Guardrails 守护模型]
 
-.Wrap-up
-* xref:90-cleanup.adoc[Cleanup]
-* xref:91-reference.adoc[Technical Reference]
+.收尾
+* xref:90-cleanup.adoc[清理]
+* xref:91-reference.adoc[技术参考]
 
-.Facilitators
-* xref:92-facilitator-guide.adoc[Facilitator Guide]
+.培训师
+* xref:92-facilitator-guide.adoc[培训师指南]
