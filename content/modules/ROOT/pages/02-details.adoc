@@ -1,77 +1,63 @@
-= Prerequisites and Environment
-:navtitle: Prerequisites and Environment
+= 前提条件与环境
+:navtitle: 前提条件与环境
 
-== What you need
-
-[cols="1,2",options="header"]
-|===
-| If you are… | You need
-
-| Every participant
-| A browser, the OpenShift console URL and the user name and password your facilitator gave you.
-All commands run in the console's Web Terminal, as you.
-
-| Using your own laptop shell instead (optional)
-| `oc` matching the cluster (download it from the console: *?* → *Command Line Tools*), `curl`
-and `jq`; log in with *Copy login command* from the user menu.
-|===
-
-Provided by the facilitator:
-
-* A dedicated OpenShift {ocp_version} cluster with OpenShift AI {rhoai_version}, one GPU node with
-  an NVIDIA L4, and the workshop operators installed by OpenShift GitOps.
-* Your user, a cluster administrator on this cluster.
-
-== Log in
-
-. Open the OpenShift console:
-  link:https://console-openshift-console.{cluster_domain}[console-openshift-console.{cluster_domain}^].
-. Choose the identity provider your facilitator named (on the test cluster, *keycloak*) and log in
-  with your user and password.
-. Check the user menu (top right).
-
-Expected result: the console opens on *Overview* with *Core platform* at the top of the left
-navigation, and the user menu (top right) shows your name, for example `Kuro Admin`.
-
-The command-line pre-flight is the first exercise of
-xref:03-module-01-your-cluster.adoc[Module 1], run in the Web Terminal.
-
-== How the exercises build on each other
-
-Run each module in one Web Terminal session, top to bottom. Later exercises use shell variables and
-helper functions that earlier exercises of the same module define (for example the registry URL in
-Module 3, or the `check` helper in Module 9), and files they save in your terminal's home directory
-(the cluster CA in `~/ingress-ca.crt`, the MaaS keys in `~/key-gold` and `~/key-bronze`).
-
-If the Web Terminal restarts (it stops after a period of inactivity, and closing the browser tab can
-end the session), re-run the current module's blocks from its first exercise. Every block is safe to
-run again; where an earlier exercise deliberately breaks and repairs something (Module 5's
-Authorino TLS, Module 9's judge), the re-run shows the repaired state instead of the failure. Day 3
-starts by checking your MaaS key and minting a new one if it is gone.
-
-== Why there is no terminal in this guide
-
-The Showroom page you are reading has no login. A terminal embedded here would run with the rights
-of whoever deployed it, available to anyone with the URL. Your user is a cluster administrator, so
-you work in the console's Web Terminal instead, which runs as you after you log in.
-
-== Access details
+== 所需条件
 
 [cols="1,2",options="header"]
 |===
-| Setting | Value
+| 参与者类型 | 所需条件
 
-| OpenShift console
+| 所有参与者
+| 一个浏览器，以及培训师提供的 OpenShift 控制台 URL、用户名和密码。
+所有命令均在控制台的 Web Terminal 中以你的身份运行。
+
+| 使用自己笔记本终端（可选）
+| 与集群版本匹配的 `oc`（可从控制台下载：*?* → *命令行工具*），以及 `curl` 和 `jq`；通过用户菜单中的*复制登录命令*进行登录。
+|===
+
+由培训师提供：
+
+* 一个专用的 OpenShift {ocp_version} 集群，已安装 OpenShift AI {rhoai_version}，含一个带 NVIDIA L4 的 GPU 节点，以及由 OpenShift GitOps 安装的工作坊所需 Operator。
+* 你的用户，在本集群中具有集群管理员权限。
+
+== 登录
+
+. 打开 OpenShift 控制台：
+  link:https://console-openshift-console.{cluster_domain}[console-openshift-console.{cluster_domain}^]。
+. 选择培训师指定的身份提供商（在测试集群上为 *keycloak*），使用你的用户名和密码登录。
+. 检查右上角的用户菜单。
+
+预期结果：控制台在*概览*页面打开，左侧导航顶部显示*核心平台*，右上角用户菜单显示你的名字，例如 `Kuro Admin`。
+
+命令行前置检查是 xref:03-module-01-your-cluster.adoc[模块 1] 的第一个练习，在 Web Terminal 中运行。
+
+== 练习之间的依赖关系
+
+请在同一个 Web Terminal 会话中，从头到尾依次运行每个模块。后续练习会使用同一模块中前面练习定义的 Shell 变量和辅助函数（例如模块 3 中的注册表 URL，或模块 9 中的 `check` 辅助函数），以及保存在终端主目录中的文件（集群 CA 证书保存在 `~/ingress-ca.crt`，MaaS 密钥保存在 `~/key-gold` 和 `~/key-bronze`）。
+
+如果 Web Terminal 重启（一段时间不活动后会自动停止，关闭浏览器标签也可能终止会话），请从当前模块的第一个练习重新运行所有代码块。每个代码块都可以安全地重复运行；对于前面练习中故意破坏后修复的情况（模块 5 的 Authorino TLS，模块 9 的评判器），重新运行后会显示修复后的状态，而不是故障状态。第三天开始时会检查你的 MaaS 密钥，如果密钥已丢失则重新生成一个。
+
+== 为什么本指南中没有终端
+
+你正在阅读的 Showroom 页面不需要登录。嵌入其中的终端会以部署它的人的权限运行，并且任何知道 URL 的人都可以访问。由于你的用户是集群管理员，因此请在控制台的 Web Terminal 中操作，它会在你登录后以你的身份运行。
+
+== 访问信息
+
+[cols="1,2",options="header"]
+|===
+| 设置项 | 值
+
+| OpenShift 控制台
 | link:https://console-openshift-console.{cluster_domain}[console-openshift-console.{cluster_domain}^]
 
-| OpenShift AI dashboard
+| OpenShift AI 控制台
 | link:https://rh-ai.{cluster_domain}[rh-ai.{cluster_domain}^]
 
-| GPU test project (Module 2)
+| GPU 测试项目（模块 2）
 | `{gpu_namespace}`
 
-| Model project (Modules 3 onwards)
+| 模型项目（模块 3 及以后）
 | `{model_namespace}`
 |===
 
-Proceed to xref:03-module-01-your-cluster.adoc[Module 1: Your cluster].
+继续前往 xref:03-module-01-your-cluster.adoc[模块 1：你的集群]。
