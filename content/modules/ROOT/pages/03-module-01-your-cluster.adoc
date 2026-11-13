@@ -1,76 +1,52 @@
-= Module 1: Your cluster
-:navtitle: Module 1: Your cluster
+= 模块 1：您的集群
+:navtitle: 模块 1：您的集群
 
-Every exercise in this workshop changes a real OpenShift cluster, and every claim is checked
-against what the cluster reports. Before changing anything, you establish who you are, what the
-cluster already has, and what it does not have yet. The customer question behind this module is
-the first one a platform team asks: _what is on this cluster today, and what will we have to add
-to run AI workloads on it?_
+本工作坊中的每个练习都会对真实的 OpenShift 集群进行更改，每个结论都会通过集群的实际报告加以验证。在进行任何更改之前，您需要先确认自己的身份、集群已有的资源以及尚未配置的内容。本模块背后的客户问题，是平台团队最常问的第一个问题：_这个集群今天有什么？要运行 AI 工作负载，我们还需要添加什么？_
 
-In this module you open the Web Terminal, confirm your identity and rights, and take an inventory
-of the GPU node, the installed operators, and OpenShift AI.
+在本模块中，您将打开 Web Terminal，确认自己的身份和权限，并对 GPU 节点、已安装的 Operator 以及 OpenShift AI 进行清点。
 
-.New to this environment?
+.初次接触此环境？
 [%collapsible]
 ====
-* *Web Terminal* — a terminal that runs in a pod on the cluster and opens inside the OpenShift
-  console; it is logged in as you, with your permissions.
-* *Operator* — a controller that installs and manages a product on the cluster through custom
-  resources (CRs).
-* *OLM (Operator Lifecycle Manager)* — installs operators from catalogs; a `Subscription` asks for
-  an operator, a `ClusterServiceVersion` (CSV) is the installed version.
-* *DataScienceCluster (DSC)* — the OpenShift AI resource that turns its components (dashboard,
-  KServe, model registry, and so on) on or off.
-* *NFD (Node Feature Discovery)* — labels each node with the hardware it finds, for example the
-  PCI vendor ID of a GPU.
+* *Web Terminal* — 在集群上某个 Pod 中运行的终端，直接在 OpenShift 控制台内打开；以您的身份登录，拥有您的权限。
+* *Operator* — 通过自定义资源（CR）在集群上安装和管理产品的控制器。
+* *OLM（Operator 生命周期管理器）* — 从目录中安装 Operator；`Subscription` 用于请求某个 Operator，`ClusterServiceVersion`（CSV）是已安装的版本。
+* *DataScienceCluster（DSC）* — OpenShift AI 的资源，用于开启或关闭各组件（控制台、KServe、模型注册表等）。
+* *NFD（Node Feature Discovery，节点特性发现）* — 为每个节点打上其硬件标签，例如 GPU 的 PCI 厂商 ID。
 ====
 
-== Technical context
+== 技术背景
 
-Your cluster was prepared by OpenShift GitOps with operators only: Node Feature Discovery, the
-NVIDIA GPU Operator, Red Hat Connectivity Link and the Web Terminal, next to an existing OpenShift
-AI {rhoai_version} installation. None of them is configured for this workshop. There is a GPU node,
-but nothing on the cluster can use its GPU yet: no hardware discovery has run, no driver is loaded,
-and no scheduler-visible GPU resource exists. You will add each missing layer yourself, as YAML you write and apply, so that at
-the end of Day 1 you can explain what every layer contributes.
+您的集群由 OpenShift GitOps 准备，仅安装了以下 Operator：Node Feature Discovery、NVIDIA GPU Operator、Red Hat Connectivity Link 和 Web Terminal，以及已有的 OpenShift AI {rhoai_version} 安装。这些组件均尚未针对本工作坊进行配置。集群中有一个 GPU 节点，但目前没有任何组件可以使用该 GPU：硬件发现尚未运行，驱动程序尚未加载，调度器也无法感知到 GPU 资源。您将自行添加每一个缺失的层，以 YAML 形式编写并应用，使得在第一天结束时，您能够解释每一层的作用。
 
-You act as yourself throughout. Your user is a cluster administrator on this dedicated cluster,
-because several labs change cluster-scoped configuration (drivers, device classes, gateways). The
-Showroom terminal is turned off on purpose: the Showroom page has no login, so a terminal there
-would hand your cluster-admin rights to anyone with the URL.
+整个过程中您以自己的身份操作。由于多个实验需要修改集群范围的配置（驱动程序、设备类、网关），您的用户在这个专属集群上拥有集群管理员权限。Showroom 终端被故意关闭：Showroom 页面没有登录保护，若在那里提供终端，任何拥有 URL 的人都能获得您的集群管理员权限。
 
-== Learning objectives
+== 学习目标
 
-* Open the Web Terminal and confirm the identity it acts as.
-* Confirm cluster-admin rights with `oc auth can-i`.
-* Find the GPU node by its taint, and show that the cluster can neither identify nor schedule its GPU yet.
-* Read which operators and OpenShift AI components are installed.
+* 打开 Web Terminal 并确认其操作身份。
+* 使用 `oc auth can-i` 确认集群管理员权限。
+* 通过污点（taint）找到 GPU 节点，并确认集群目前既无法识别也无法调度该 GPU。
+* 查看已安装的 Operator 和 OpenShift AI 组件。
 
-== Exercise 1: Open the Web Terminal and check who you are
+== 练习 1：打开 Web Terminal 并确认身份
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m1-ex1.mp4[width=100%]
 
-. If the console opens with *Welcome to the new OpenShift experience!* (it does on your first login),
-  click *Skip tour*.
-. In the OpenShift console, click the *Command line terminal* icon (*>_*) in the top bar. In a
-  narrow browser window the top bar folds it into the *Utility menu* (*⋮*).
-. The *OpenShift command line terminal* panel opens at the bottom with *Initialize terminal*.
-  Keep the *Project* `openshift-terminal` and click *Start*.
-. Wait until the panel shows `Welcome to the OpenShift Web Terminal` and a `bash` prompt.
+. 如果控制台显示 *Welcome to the new OpenShift experience!*（首次登录时会出现），点击 *Skip tour*。
+. 在 OpenShift 控制台中，点击顶部栏的 *Command line terminal* 图标（*>_*）。若浏览器窗口较窄，该图标会折叠进 *Utility menu*（*⋮*）。
+. 底部弹出 *OpenShift command line terminal* 面板，显示 *Initialize terminal*。保持 *Project* 为 `openshift-terminal`，点击 *Start*。
+. 等待面板显示 `Welcome to the OpenShift Web Terminal` 和 `bash` 提示符。
 
-image::03-web-terminal-start.png[The Initialize terminal panel with Project openshift-terminal and the Start button]
+image::03-web-terminal-start.png[初始化终端面板，显示 Project openshift-terminal 和 Start 按钮]
 
-NOTE: The terminal stops after 15 minutes without typing (its default idle timeout), and your shell
-variables go with it. If you expect to step away, set a longer *Timeout* in the *Initialize terminal*
-panel before you click *Start*. If it does stop, reopen it and re-run the current module from its
-first exercise.
+NOTE: 终端在 15 分钟无输入后会自动停止（默认空闲超时），Shell 变量也会随之消失。如果预计需要离开，请在点击 *Start* 前在 *Initialize terminal* 面板中设置更长的 *Timeout*。若终端已停止，重新打开并从当前模块的第一个练习重新开始。
 
-TIP: For more room, open the same terminal full page in a new browser tab:
-link:https://console-openshift-console.{cluster_domain}/terminal[console-openshift-console.{cluster_domain}/terminal^].
-The step videos use that view.
+TIP: 如需更大的操作空间，可在新的浏览器标签页中全屏打开同一终端：
+link:https://console-openshift-console.{cluster_domain}/terminal[console-openshift-console.{cluster_domain}/terminal^]。
+步骤视频使用的就是该视图。
 
-Then run:
+然后运行：
 
 [source,bash,role="execute"]
 ----
@@ -78,21 +54,16 @@ oc whoami
 oc auth can-i '*' '*' --all-namespaces
 ----
 
-Expected result: `oc whoami` prints your user name (the one the facilitator gave you, for example
-`kuro`), and `oc auth can-i` prints `yes`: your user may perform any action on any resource, which
-is cluster-admin. Every later command runs with these rights. The terminal has `oc`, `jq`, `curl`
-and `git`; the guide uses nothing else.
+预期结果：`oc whoami` 打印您的用户名（由培训师提供，例如 `kuro`），`oc auth can-i` 打印 `yes`：您的用户可对任何资源执行任何操作，即集群管理员权限。后续所有命令均以此权限运行。终端内置 `oc`、`jq`、`curl` 和 `git`；本指南不使用其他工具。
 
-In short: you are a cluster administrator, acting as yourself, from a terminal that lives on the
-cluster.
+简言之：您是集群管理员，以自己的身份操作，终端运行在集群上。
 
-== Exercise 2: Find the GPU node
+== 练习 2：找到 GPU 节点
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m1-ex2.mp4[width=100%]
 
-The GPU node was added with a taint, `nvidia.com/gpu`, which keeps ordinary pods off the expensive
-node: only pods that tolerate the taint are scheduled there. Find it by that taint:
+GPU 节点添加时携带了污点 `nvidia.com/gpu`，以阻止普通 Pod 调度到这个高价值节点：只有容忍该污点的 Pod 才会被调度到这里。通过污点找到该节点：
 
 [source,bash,role="execute"]
 ----
@@ -100,16 +71,14 @@ oc get nodes -o custom-columns=NODE:.metadata.name,INSTANCE:.metadata.labels.nod
   | grep -E 'NODE|nvidia.com/gpu'
 ----
 
-Expected result: the header and exactly one node, instance type `g6.2xlarge` (8 vCPUs and one
-NVIDIA L4 GPU), with taint `nvidia.com/gpu`.
+预期结果：显示标题行和一个节点，实例类型为 `g6.2xlarge`（8 个 vCPU 和一块 NVIDIA L4 GPU），污点为 `nvidia.com/gpu`。
 
-== Exercise 3: Show that the GPU is not usable yet (negative control)
+== 练习 3：确认 GPU 当前不可用（负向验证）
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m1-ex3.mp4[width=100%]
 
-A GPU becomes usable when three things exist: something that recognises the hardware on the node,
-a kernel driver, and a way for the scheduler to see and hand out the device. Check all three:
+GPU 可用需要三个条件：能识别节点上硬件的组件、内核驱动程序，以及让调度器感知并分配设备的机制。逐一检查：
 
 [source,bash,role="execute"]
 ----
@@ -120,15 +89,11 @@ echo "GPU device classes:"; oc get deviceclass -o name | grep nvidia || echo "no
 echo "driver pods:"; oc get pods -n nvidia-gpu-operator -o name | grep -E 'driver|dra' || echo "none"
 ----
 
-Expected result: `NVIDIA PCI label on <node>:` is followed by nothing (no hardware discovery has
-run); allocatable is `{"cpu":"7500m","ephemeral-storage":…,"memory":"29423584Ki","pods":"250"}`
-with no `nvidia.com/gpu`; `GPU device classes:` prints `none`; `driver pods:` prints `none`. The
-hardware is present, but the cluster neither knows it is a GPU nor can schedule anything onto it.
-Module 2 adds the missing layers.
+预期结果：`NVIDIA PCI label on <node>:` 后面为空（硬件发现尚未运行）；allocatable 为 `{"cpu":"7500m","ephemeral-storage":…,"memory":"29423584Ki","pods":"250"}`，不含 `nvidia.com/gpu`；`GPU device classes:` 打印 `none`；`driver pods:` 打印 `none`。硬件存在，但集群既不知道这是 GPU，也无法将任何 Pod 调度到它上面。模块 2 将添加缺失的各层。
 
-== Exercise 4: Take an inventory of operators and OpenShift AI
+== 练习 4：清点 Operator 和 OpenShift AI
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m1-ex4.mp4[width=100%]
 
 [source,bash,role="execute"]
@@ -137,13 +102,9 @@ oc get csv -A --no-headers 2>/dev/null | awk '{print $2, $NF}' | sort -u | grep 
 oc get datasciencecluster -o jsonpath='{range .items[*].status.conditions[?(@.status=="True")]}{.type}{"\n"}{end}' | grep -E 'Ready|KserveReady|ModelRegistryReady|DashboardReady'
 ----
 
-Expected result: every listed CSV shows `Succeeded`: `nfd.4.20…`,
-`gpu-operator-certified.v{gpu_operator_version}`, `rhcl-operator.v1.4.3` with the `authorino-operator` and
-`limitador-operator` it depends on, `web-terminal.v1.17.1` and `rhods-operator.3.5.2` (OpenShift AI
-{rhoai_version}). The DataScienceCluster conditions include `Ready`, `KserveReady`,
-`ModelRegistryReady` and `DashboardReady`. Operators are installed, but nothing is configured yet.
+预期结果：每个列出的 CSV 均显示 `Succeeded`：`nfd.4.20…`、`gpu-operator-certified.v{gpu_operator_version}`、`rhcl-operator.v1.4.3` 及其依赖的 `authorino-operator` 和 `limitador-operator`、`web-terminal.v1.17.1` 和 `rhods-operator.3.5.2`（OpenShift AI {rhoai_version}）。DataScienceCluster 条件包含 `Ready`、`KserveReady`、`ModelRegistryReady` 和 `DashboardReady`。Operator 已安装，但尚未进行任何配置。
 
-.The scripted assertion for this module
+.本模块的脚本化断言
 [%collapsible]
 ====
 [source,bash]
@@ -159,22 +120,20 @@ echo PASS
 ----
 ====
 
-== Evidence checkpoint
+== 检查点
 
-Before continuing, verify that you can answer:
+继续之前，请确认您能够回答以下问题：
 
-* How did you find the GPU node, and what keeps ordinary pods off it?
-* Which three layers are missing before a pod can use the GPU?
-* Why is the Showroom terminal turned off in this workshop?
+* 您是如何找到 GPU 节点的？什么机制阻止了普通 Pod 调度到该节点？
+* 在 Pod 能够使用 GPU 之前，缺少哪三个层？
+* 为什么本工作坊关闭了 Showroom 终端？
 
-.Answer key
+.参考答案
 [%collapsible]
 ====
-* By its `nvidia.com/gpu` taint; the taint keeps every pod that does not tolerate it off the node.
-* Hardware discovery (no NFD label yet), the kernel driver (no driver pod), and a scheduler-visible
-  device (neither a device plugin resource nor a DRA device class).
-* The Showroom page has no login; a terminal there would give your cluster-admin rights to anyone
-  who has the URL.
+* 通过 `nvidia.com/gpu` 污点找到；该污点会阻止所有不容忍它的 Pod 调度到该节点。
+* 硬件发现（尚无 NFD 标签）、内核驱动程序（无驱动程序 Pod）、以及调度器可见的设备（既无设备插件资源，也无 DRA 设备类）。
+* Showroom 页面没有登录保护；终端放在那里会将您的集群管理员权限暴露给任何拥有 URL 的人。
 ====
 
-Proceed to xref:04-module-02-gpus-dra.adoc[Module 2: GPUs the DRA way].
+继续 xref:04-module-02-gpus-dra.adoc[模块 2：DRA 方式使用 GPU]。
