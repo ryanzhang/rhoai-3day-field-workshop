@@ -1,98 +1,71 @@
-= Module 3: Onboard a model
-:navtitle: Module 3: Onboard a model
+= 模块 3：模型上线
+:navtitle: 模块 3：模型上线
 
-A GPU is only useful once a model runs on it, and enterprises do not let just any model run. They
-want to know where it came from, which version is in production, and who can call it. The
-customer question: _how do I take a model my organisation trusts, record it, and serve it on our
-own GPUs behind authentication?_
+GPU 只有在运行模型后才有价值，而企业并不会让任意模型随意运行。他们需要知道模型来自哪里、生产中使用的是哪个版本，以及谁有权调用它。客户的问题是：_我如何将组织信任的模型记录在案，并在自有 GPU 上以认证方式提供服务？_
 
-In this module you find a Red Hat validated model in the OpenShift AI catalog, create a model
-registry and record the model and its version in it, then serve it with vLLM on the GPU you claimed
-in Module 2, and prove who can and cannot call it.
+在本模块中，您将在 OpenShift AI 目录中找到红帽已验证的模型，创建一个模型注册表并记录该模型及其版本，然后使用模块 2 中申请的 GPU 通过 vLLM 提供服务，并验证哪些调用者有权限、哪些没有。
 
-.New to model serving on OpenShift AI?
+.初次接触 OpenShift AI 模型服务？
 [%collapsible]
 ====
-* *Modelcar* — a model packaged as an OCI container image (`oci://…`), pulled and cached like any
-  image; no S3 bucket or credentials needed.
-* *Model registry* — a service that records registered models, their versions and the artifacts
-  (where the files live) and metadata of each version.
-* *KServe* — the serving layer of OpenShift AI; an `InferenceService` declares a model server.
-* *ServingRuntime* — the template of the server container KServe runs, here vLLM for NVIDIA GPUs.
-* *vLLM* — the inference engine; it loads the model onto the GPU and manages the KV cache (the
-  per-token memory that lets it serve many requests at once).
+* *Modelcar* — 以 OCI 容器镜像（`oci://…`）打包的模型，像普通镜像一样拉取和缓存；无需 S3 存储桶或凭据。
+* *模型注册表* — 记录已注册模型、其版本以及每个版本的制品（文件所在位置）和元数据的服务。
+* *KServe* — OpenShift AI 的服务层；`InferenceService` 声明一个模型服务器。
+* *ServingRuntime* — KServe 运行的服务器容器模板，本例中使用面向 NVIDIA GPU 的 vLLM。
+* *vLLM* — 推理引擎；将模型加载到 GPU 上并管理 KV cache（每个 token 的缓存内存，使其能同时处理多个请求）。
 ====
 
-== Technical context
+== 技术背景
 
-Onboarding has three steps, each owned by a different component:
+模型上线分三个步骤，分别由不同组件负责：
 
 [cols="1,2,2",options="header"]
 |===
-| Step | Component | What it records or does
+| 步骤 | 组件 | 记录或执行的内容
 
-| Choose
-| Model catalog (`model-catalog` service in `{registry_namespace}`)
-| lists Red Hat validated models with their size, licence, tasks and the modelcar image of each
+| 选择
+| 模型目录（`{registry_namespace}` 中的 `model-catalog` 服务）
+| 列出红帽已验证的模型，包括大小、许可证、任务以及每个模型的 modelcar 镜像
 
-| Record
-| Model registry (a `ModelRegistry` you create; REST API behind kube-rbac-proxy)
-| registered model → version → artifact (the `oci://` URI and model format)
+| 记录
+| 模型注册表（您创建的 `ModelRegistry`；kube-rbac-proxy 后面的 REST API）
+| 已注册模型 → 版本 → 制品（`oci://` URI 和模型格式）
 
-| Serve
+| 服务
 | KServe `InferenceService` + vLLM `ServingRuntime`
-| a Deployment whose pod pulls the modelcar, claims the GPU through DRA, and exposes an
-  OpenAI-compatible API behind authentication
+| 一个 Deployment，其 Pod 拉取 modelcar，通过 DRA 申请 GPU，并在认证后暴露兼容 OpenAI 的 API
 |===
 
-The model is *{model_display}*: a 7B-parameter hybrid model (transformer layers mixed with Mamba
-state-space layers) in which only about 1B parameters are active per token (mixture of experts),
-quantised to FP8. On the L4 it needs about 6.6 GiB for weights, which leaves room for a large KV
-cache now and for two replicas on Day 2.
+模型为 *{model_display}*：一个 70 亿参数的混合模型（Transformer 层与 Mamba 状态空间层交替），每个 token 仅激活约 10 亿参数（专家混合架构），并以 FP8 量化。在 L4 上，权重约需 6.6 GiB，剩余空间可用于大型 KV cache 以及第 2 天的两个副本。
 
-Authentication is switched on with one annotation, `security.opendatahub.io/enable-auth: "true"`.
-KServe then puts a kube-rbac-proxy in front of vLLM: every request must carry an OpenShift bearer
-token, and the token's identity must be allowed to `get` the InferenceService.
+认证通过一个注解开启：`security.opendatahub.io/enable-auth: "true"`。KServe 随后在 vLLM 前放置一个 kube-rbac-proxy：每个请求都必须携带 OpenShift bearer token，且该 token 的身份必须被允许对 InferenceService 执行 `get` 操作。
 
-// NOT-IN-DOCS: OpenShift AI 3.5 documents GPU serving through hardware profiles (device plugin).
-// Requesting the GPU with resourceClaims in the InferenceService predictor is DRA-native and is
-// accepted by the KServe CRD, but is not a documented OpenShift AI procedure.
-NOTE: OpenShift AI {rhoai_version} documents GPU serving through hardware profiles, which request
-`nvidia.com/gpu`. On a DRA-only GPU node there is no such resource, so this module requests the GPU
-with `resourceClaims` in the InferenceService, a field the KServe API accepts. The
-xref:91-reference.adoc[Technical Reference] lists what that implies.
+// NOT-IN-DOCS: OpenShift AI 3.5 通过硬件配置文件（设备插件）记录 GPU 服务。在 InferenceService predictor 中用 resourceClaims 请求 GPU 是 DRA 原生方式，KServe CRD 接受，但不是有文档的 OpenShift AI 过程。
+NOTE: OpenShift AI {rhoai_version} 通过硬件配置文件（请求 `nvidia.com/gpu`）记录 GPU 服务。在仅有 DRA 的 GPU 节点上不存在此类资源，因此本模块在 InferenceService 中使用 `resourceClaims` 请求 GPU——KServe API 接受该字段。详见 xref:91-reference.adoc[技术参考]。
 
-== Learning objectives
+== 学习目标
 
-* Find a validated model and its modelcar image in the model catalog.
-* Create a model registry and record a model, a version and its artifact through the REST API.
-* Serve the model with vLLM on a DRA-claimed GPU, with authentication on.
-* Prove that anonymous and unauthorised callers are rejected and an authorised caller is answered.
-* Read vLLM's startup report: weight memory, KV cache size and maximum concurrency.
+* 在模型目录中找到已验证的模型及其 modelcar 镜像。
+* 创建模型注册表，并通过 REST API 记录模型、版本及其制品。
+* 使用 DRA 申请的 GPU 通过 vLLM 提供模型服务，并开启认证。
+* 验证匿名调用者和未授权调用者被拒绝，授权调用者可正常访问。
+* 读取 vLLM 的启动报告：权重内存、KV cache 大小和最大并发数。
 
-== Exercise 1: Find the model in the catalog
+== 练习 1：在目录中找到模型
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m3-ex1.mp4[width=100%]
 
-. Open the OpenShift AI dashboard: in the OpenShift console, click the *Application launcher* (the
-  grid icon in the top bar) and, under *OpenShift Self Managed Services*, choose *Red Hat OpenShift
-  AI*. Log in again with the same identity provider if asked. Close the welcome tour if it opens.
-. In the left menu, open *AI hub* → *Models*. The page opens on its *Catalog* tab.
-. In the *Filter by name, description…* box (not the *Task* filter), type `granite-4.0-h-tiny` and
-  press Enter, then open the card *granite-4.0-h-tiny-FP8-dynamic*.
-. Read the card: the *Validated* badge, *Provided by IBM*, and in the details *Minimum vRAM*,
-  *Container size* and *Model location*.
+. 打开 OpenShift AI 控制台：在 OpenShift 控制台中，点击顶部栏的 *Application launcher*（方格图标），在 *OpenShift Self Managed Services* 下选择 *Red Hat OpenShift AI*。如有需要，使用相同的身份提供商再次登录。如有欢迎导览，请关闭。
+. 在左侧菜单中，依次打开 *AI hub* → *Models*。页面在 *Catalog* 标签页打开。
+. 在 *Filter by name, description…* 输入框（不是 *Task* 过滤器）中输入 `granite-4.0-h-tiny`，按 Enter，然后打开卡片 *granite-4.0-h-tiny-FP8-dynamic*。
+. 阅读卡片内容：*Validated* 徽章、*Provided by IBM*，以及详情中的 *Minimum vRAM*、*Container size* 和 *Model location*。
 
-image::05-catalog-card.png[The granite-4.0-h-tiny-FP8-dynamic catalog card with the Validated badge, Deploy model and Register model buttons]
+image::05-catalog-card.png[granite-4.0-h-tiny-FP8-dynamic 目录卡片，显示 Validated 徽章、Deploy model 和 Register model 按钮]
 
-Expected result: the card is titled `granite-4.0-h-tiny-FP8-dynamic`, *Validated*, *Provided by
-IBM*, with *Minimum vRAM* `8.20 GB`, *Container size* `7.13 GB` and *Model location*
-`{model_uri}`. The *Register model* and *Deploy model* buttons do in clicks what Exercises 3-5 do
-in YAML.
+预期结果：卡片标题为 `granite-4.0-h-tiny-FP8-dynamic`，*Validated*，*Provided by IBM*，*Minimum vRAM* 为 `8.20 GB`，*Container size* 为 `7.13 GB`，*Model location* 为 `{model_uri}`。*Register model* 和 *Deploy model* 按钮通过点击实现练习 3-5 用 YAML 完成的操作。
 
-The catalog is a service with an API, so the same facts, and the image to deploy, can be read from
-the terminal:
+目录是有 API 的服务，因此同样的信息以及要部署的镜像也可以通过终端读取：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -103,17 +76,14 @@ $CAT "http://localhost:8080/api/model_catalog/v1alpha1/sources/redhat_ai_validat
   | jq -r '.items[] | .uri // empty | select(startswith("oci://"))'
 ----
 
-Expected result: one model, `redhat_ai_validated_models  RedHatAI/granite-4.0-h-tiny-FP8-dynamic
-6.9B params`, and one artifact, `{model_uri}`, the same location the card showed. That URI is what
-KServe will pull.
+预期结果：一个模型 `redhat_ai_validated_models  RedHatAI/granite-4.0-h-tiny-FP8-dynamic 6.9B params`，以及一个制品 `{model_uri}`，与卡片显示的位置相同。这个 URI 就是 KServe 将要拉取的地址。
 
-== Exercise 2: Create a model registry
+== 练习 2：创建模型注册表
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m3-ex2.mp4[width=100%]
 
-The catalog is Red Hat's list. The registry is _yours_: it records what your organisation decided
-to use. OpenShift AI's model registry operator deploys a registry from one CR.
+目录是红帽的列表。注册表是_您的_：它记录您的组织决定使用的内容。OpenShift AI 的模型注册表 Operator 通过一个 CR 部署注册表。
 
 [source,yaml,subs="attributes+"]
 ----
@@ -127,16 +97,12 @@ spec:
   rest: {}                          # <3>
   kubeRBACProxy: {}                 # <4>
 ----
-<1> *namespace* — the namespace the DataScienceCluster names for registries (`registriesNamespace`).
-<2> *generateDeployment* — the operator deploys a PostgreSQL database for the registry's metadata.
-<3> *rest* — expose the REST API.
-<4> *kubeRBACProxy* — put the REST API behind OpenShift authentication and RBAC, and create a Route.
+<1> *namespace* — DataScienceCluster 为注册表指定的命名空间（`registriesNamespace`）。
+<2> *generateDeployment* — Operator 为注册表元数据部署 PostgreSQL 数据库。
+<3> *rest* — 暴露 REST API。
+<4> *kubeRBACProxy* — 在 REST API 前加 OpenShift 认证和 RBAC，并创建 Route。
 
-From here on, commands send your OpenShift token (a cluster-admin credential) to cluster
-endpoints, so they verify the server first: the block saves the system CAs plus the chain that
-signs the cluster's ingress certificate (self-signed on some clusters, publicly signed on an RHDP
-order) and points `curl` at it with `CURL_CA_BUNDLE`. No command in this workshop uses `curl -k`
-with a token or key.
+从现在起，命令会将您的 OpenShift token（集群管理员凭据）发送到集群端点，因此会先验证服务器：以下代码块保存系统 CA 以及签署集群入口证书的证书链（某些集群为自签名，RHDP 订单上为公开签名的），并通过 `CURL_CA_BUNDLE` 告知 `curl` 使用该证书。本工作坊中没有任何命令使用 `curl -k` 加 token 或密钥。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -159,25 +125,23 @@ REGISTRY=https://$(oc get route {registry_name}-https -n {registry_namespace} -o
 echo "$REGISTRY"
 ----
 
-Expected result: `~/ingress-ca.crt` is written, `modelregistry.modelregistry.opendatahub.io/{registry_name} condition met`, and
-the registry URL `https://{registry_name}-rest.{cluster_domain}/api/model_registry/v1alpha3`.
+预期结果：`~/ingress-ca.crt` 已写入，`modelregistry.modelregistry.opendatahub.io/{registry_name} condition met`，以及注册表 URL `https://{registry_name}-rest.{cluster_domain}/api/model_registry/v1alpha3`。
 
-== Exercise 3: Record the model, its version and its artifact
+== 练习 3：记录模型、版本及制品
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m3-ex3.mp4[width=100%]
 
-First the negative control: the registry must refuse an anonymous caller.
+首先进行负向验证：注册表必须拒绝匿名调用者。
 
 [source,bash,role="execute"]
 ----
 curl -s -o /dev/null -w 'anonymous: %{http_code}\n' "$REGISTRY/registered_models"
 ----
 
-Expected result: `anonymous: 401`. The kube-rbac-proxy rejects requests without a token.
+预期结果：`anonymous: 401`。kube-rbac-proxy 拒绝没有 token 的请求。
 
-Now record the model, version `3.0`, and the artifact that points at the modelcar. Each record is
-created only if a lookup by name finds none, so the block is safe to run again:
+现在记录模型、版本 `3.0` 以及指向 modelcar 的制品。每条记录只在按名称查找不到时才创建，因此该代码块可以安全地重复运行：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -196,24 +160,16 @@ reg "$REGISTRY/model_versions/$MV_ID/artifacts" | jq '.items[] | {name, uri, mod
 reg "$REGISTRY/registered_models/$RM_ID/versions" | jq -r '.items[] | "\(.name) \(.state)"'
 ----
 
-Expected result: `registered model id: 1, version id: 2` (IDs as on a fresh registry); one artifact
-with `"uri": "{model_uri}"` and `"modelFormatName": "vLLM"`; and the version list shows `3.0 LIVE`. The
-registry now answers "which image is version 3.0 of this model" for anyone allowed to ask.
+预期结果：`registered model id: 1, version id: 2`（全新注册表的 ID）；一个制品，`"uri": "{model_uri}"`，`"modelFormatName": "vLLM"`；版本列表显示 `3.0 LIVE`。注册表现在可以回答"这个模型的 3.0 版本对应哪个镜像"。
 
-GUI view: in the OpenShift AI dashboard, *AI hub* → *Models* → *Registry* tab, model registry
-`{registry_name}`: the model `granite-4.0-h-tiny-fp8`, latest version `3.0`, owner your user, and
-*Deployments* `-` (nothing deployed yet).
+图形界面视图：在 OpenShift AI 控制台中，*AI hub* → *Models* → *Registry* 标签页，模型注册表 `{registry_name}`：模型 `granite-4.0-h-tiny-fp8`，最新版本 `3.0`，所有者为您的用户，*Deployments* 显示 `-`（尚未部署）。
 
-== Exercise 4: Prepare the serving project
+== 练习 4：准备服务 Project
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m3-ex4.mp4[width=100%]
 
-Create a data science project for models and a GPU claim template in it, then write the
-`ServingRuntime`: the container KServe will run for every InferenceService that names it. The
-OpenShift AI dashboard creates the same object from a template it ships
-(`vllm-cuda-runtime-template`); here you write it, so you can see that a runtime is nothing more
-than a container spec plus the model formats it serves.
+创建一个用于模型的数据科学 Project 和 GPU 申请模板，然后编写 `ServingRuntime`：KServe 为每个命名该 Runtime 的 InferenceService 运行的容器。OpenShift AI 控制台通过内置模板（`vllm-cuda-runtime-template`）创建相同的对象；这里您手动编写，以便了解 Runtime 本质上只是一个容器规格加上它所服务的模型格式。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -237,11 +193,9 @@ spec:
 EOF
 ----
 
-Expected result: the project `{model_namespace}` exists with the label
-`opendatahub.io/dashboard=true` (so the dashboard lists it), and
-`resourceclaimtemplate.resource.k8s.io/one-l4 created`.
+预期结果：Project `{model_namespace}` 存在，带有标签 `opendatahub.io/dashboard=true`（使控制台列出该 Project），以及 `resourceclaimtemplate.resource.k8s.io/one-l4 created`。
 
-The runtime's key fields:
+Runtime 的关键字段：
 
 [source,yaml,subs="attributes+"]
 ----
@@ -256,10 +210,10 @@ spec:
     args: [--port=8080, --model=/mnt/models, "--served-model-name={{.Name}}"]   # <4>
     ports: [{containerPort: 8080, protocol: TCP}]
 ----
-<1> *supportedModelFormats* — an InferenceService whose `modelFormat` is `vLLM` can use this runtime.
-<2> *kserve-container* — the name KServe expects; the InferenceService's `args`, `resources` and storage are merged into it.
-<3> *image* — Red Hat's build of vLLM (Red Hat AI Inference Server) shipped with OpenShift AI {rhoai_version}, pinned by digest.
-<4> *args* — `/mnt/models` is where KServe mounts the modelcar's files; `{{.Name}}` becomes the InferenceService name, which clients send as `model`.
+<1> *supportedModelFormats* — `modelFormat` 为 `vLLM` 的 InferenceService 可以使用此 Runtime。
+<2> *kserve-container* — KServe 期望的名称；InferenceService 的 `args`、`resources` 和存储会被合并到此容器中。
+<3> *image* — OpenShift AI {rhoai_version} 附带的 vLLM 红帽构建（Red Hat AI Inference Server），通过摘要固定版本。
+<4> *args* — `/mnt/models` 是 KServe 挂载 modelcar 文件的位置；`{{.Name}}` 变为 InferenceService 名称，客户端以此作为 `model` 参数发送请求。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -298,12 +252,11 @@ echo "yours:    $(oc get servingruntime vllm-cuda-runtime -n {model_namespace} -
 echo "template: $(oc process -n redhat-ods-applications vllm-cuda-runtime-template -o jsonpath='{.items[0].spec.containers[0].image}')"
 ----
 
-Expected result: `servingruntime.serving.kserve.io/vllm-cuda-runtime created`, and the two image
-lines are identical: the runtime you wrote runs exactly the vLLM build the dashboard would have used.
+预期结果：`servingruntime.serving.kserve.io/vllm-cuda-runtime created`，两行镜像地址完全相同：您编写的 Runtime 与控制台使用的 vLLM 构建完全一致。
 
-== Exercise 5: Serve the model on the claimed GPU
+== 练习 5：在申请的 GPU 上提供模型服务
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m3-ex5.mp4[width=100%]
 
 [source,yaml,subs="attributes+"]
@@ -323,11 +276,11 @@ spec:
       storageUri: {model_uri}
       args: ["--max-model-len=16384", "--enable-auto-tool-choice", "--tool-call-parser=granite4"]   # <5>
 ----
-<1> *deploymentMode* — a plain Deployment and Service (no Knative); the standard mode for LLMs.
-<2> *enable-auth* — put kube-rbac-proxy in front of vLLM; callers need a token and RBAC.
-<3> *registry labels* — name the registry, model and version this deployment came from, the labels the dashboard sets when it deploys from a registry. They do not tell the registry anything; Exercise 6 does that.
-<4> *resourceClaims* — the GPU, claimed exactly as the test pods did in Module 2.
-<5> *vLLM args* — context length, and tool calling with Granite 4's parser (used on Day 3).
+<1> *deploymentMode* — 普通 Deployment 和 Service（无 Knative）；LLM 的标准模式。
+<2> *enable-auth* — 在 vLLM 前加 kube-rbac-proxy；调用者需要 token 和 RBAC 权限。
+<3> *registry labels* — 标记此部署来自哪个注册表、模型和版本，这是控制台从注册表部署时设置的标签。这些标签不会告知注册表任何信息；练习 6 负责此操作。
+<4> *resourceClaims* — GPU 申请方式与模块 2 中的测试 Pod 完全相同。
+<5> *vLLM args* — 上下文长度，以及使用 Granite 4 解析器的工具调用（第 3 天使用）。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -362,9 +315,9 @@ spec:
 EOF
 ----
 
-Expected result: `inferenceservice.serving.kserve.io/{model_name} created`.
+预期结果：`inferenceservice.serving.kserve.io/{model_name} created`。
 
-Pulling the modelcar and starting vLLM takes several minutes. Wait for `Ready`:
+拉取 modelcar 和启动 vLLM 需要几分钟。等待 `Ready`：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -374,20 +327,14 @@ oc get resourceclaims -n {model_namespace} \
   -o custom-columns=CLAIM:.metadata.name,DEVICE:.status.allocation.devices.results[0].device,RESERVED_FOR:.status.reservedFor[*].name
 ----
 
-Expected result: `inferenceservice.serving.kserve.io/{model_name} condition met`; the URL is
-`https://{model_name}-{model_namespace}.{cluster_domain}`; and one claim, `{model_name}-predictor-…-gpu-…`,
-is allocated to `gpu-0` and reserved for the predictor pod. The model server holds the GPU through
-the same DRA mechanism as the test pods.
+预期结果：`inferenceservice.serving.kserve.io/{model_name} condition met`；URL 为 `https://{model_name}-{model_namespace}.{cluster_domain}`；一个申请 `{model_name}-predictor-…-gpu-…` 分配到 `gpu-0` 并为 predictor Pod 保留。模型服务器通过与测试 Pod 相同的 DRA 机制持有 GPU。
 
-== Exercise 6: Record the deployment in the registry
+== 练习 6：在注册表中记录部署信息
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m3-ex6.mp4[width=100%]
 
-The registry does not watch the cluster. It knows about a deployment only when someone records it,
-which the dashboard does when you click *Deploy model* from a registered version. The registry's
-model is simple: a *serving environment* (here, your project) holds *inference services*, each
-pointing at a registered model and version. Record yours:
+注册表不会监视集群。只有在有人记录时，它才知道某个部署的存在，而当您从注册版本点击 *Deploy model* 时，控制台就会完成此操作。注册表的模型很简单：一个_服务环境_（此处为您的 Project）包含多个_推理服务_，每个服务指向一个已注册的模型和版本。记录您的部署：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -400,21 +347,18 @@ SE_ID=$(reg "$REGISTRY/serving_environment?name={model_namespace}" | jq -r '.id 
 reg "$REGISTRY/inference_services" | jq -r '.items[] | "\(.name) model=\(.registeredModelId) version=\(.modelVersionId) \(.desiredState)"'
 ----
 
-Expected result: on the first run `recorded: {model_name}` (a re-run skips the record and prints
-only the list), then `{model_name} model=1 version=2 DEPLOYED` (IDs as on a fresh registry): the
-registry now records which version runs in `{model_namespace}`. The registry can now answer "where is version 3.0 running?".
+预期结果：首次运行显示 `recorded: {model_name}`（重新运行时跳过记录，只打印列表），然后 `{model_name} model=1 version=2 DEPLOYED`（全新注册表的 ID）：注册表现在记录了哪个版本在 `{model_namespace}` 中运行。注册表现在可以回答"3.0 版本在哪里运行？"。
 
-GUI view: refresh *AI hub* → *Models* → *Registry*: the *Deployments* column for
-`granite-4.0-h-tiny-fp8` now reads `1 deployment`.
+图形界面视图：刷新 *AI hub* → *Models* → *Registry*：`granite-4.0-h-tiny-fp8` 的 *Deployments* 列现在显示 `1 deployment`。
 
-image::05-registry-deployment.png[The field-registry model list showing granite-4.0-h-tiny-fp8, version 3.0, 1 deployment]
+image::05-registry-deployment.png[field-registry 模型列表，显示 granite-4.0-h-tiny-fp8，版本 3.0，1 个部署]
 
-== Exercise 7: Prove who can call the model
+== 练习 7：验证哪些调用者可以访问模型
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m3-ex7.mp4[width=100%]
 
-Three callers: nobody, a ServiceAccount with no rights, and you.
+三种调用者：匿名用户、没有权限的 ServiceAccount，以及您本人。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -425,11 +369,9 @@ curl -s -o /dev/null -w 'SA without RBAC:    %\{http_code}\n' -H "Authorization:
 curl -s -o /dev/null -w 'you (cluster-admin): %\{http_code}\n' -H "Authorization: Bearer $(oc whoami -t)" "$URL/v1/models"
 ----
 
-Expected result: `anonymous: 401`, `SA without RBAC: 403`, `you (cluster-admin): 200`. 401 means
-"who are you?" (no token); 403 means "I know who you are, and you may not" (the ServiceAccount
-cannot `get` the InferenceService).
+预期结果：`anonymous: 401`，`SA without RBAC: 403`，`you (cluster-admin): 200`。401 表示"您是谁？"（无 token）；403 表示"我知道您是谁，但您没有权限"（该 ServiceAccount 无法 `get` InferenceService）。
 
-Now ask the model something, with a tool it may decide to call:
+现在向模型提问，并附带它可能决定调用的工具：
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -441,16 +383,14 @@ curl -s "$URL/v1/chat/completions" -H "Authorization: Bearer $(oc whoami -t)" -H
   "max_tokens": 200}' | jq '{finish: .choices[0].finish_reason, tool_calls: .choices[0].message.tool_calls, usage}'
 ----
 
-Expected result: `"finish": "tool_calls"` and one tool call to `get_weather` with arguments
-`{"city": "Seoul"}`, plus a `usage` block counting prompt and completion tokens. The model did not
-answer; it asked the caller to run a tool. That is the building block of the Day 3 agent.
+预期结果：`"finish": "tool_calls"` 以及对 `get_weather` 的一次工具调用，参数为 `{"city": "Seoul"}`，外加统计 prompt 和补全 token 的 `usage` 块。模型没有直接回答，而是要求调用者运行一个工具。这就是第 3 天 Agent 的基础构建块。
 
-== Exercise 8: Read what vLLM did with the GPU
+== 练习 8：读取 vLLM 对 GPU 的使用情况
 
-.Video: this exercise on the test cluster, run as a participant (waits sped up)
+.视频：本练习在测试集群上以参与者身份运行（等待时间已加速）
 video::m3-ex8.mp4[width=100%]
 
-vLLM reports how it split the GPU's memory at startup.
+vLLM 在启动时报告它如何分配 GPU 显存。
 
 [source,bash,role="execute",subs="attributes+"]
 ----
@@ -458,37 +398,26 @@ oc logs -n {model_namespace} deploy/{model_name}-predictor -c kserve-container \
   | grep -o -E 'Model loading took [0-9.]+ GiB|Available KV cache memory: [0-9.]+ GiB|GPU KV cache size: [0-9,]+ tokens|Maximum concurrency for [0-9,]+ tokens per request: [0-9.]+x' | sort -u
 ----
 
-Expected result: `Model loading took 6.64 GiB`, `Available KV cache memory: 12.25 GiB`, a KV cache
-of about 1.3 million tokens, and a maximum concurrency of about 80 requests at the full
-16,384-token context. The weights are fixed; everything vLLM can still allocate becomes KV cache,
-and the KV cache decides how many requests run at once. A hybrid Mamba model needs far less cache
-per token than a pure transformer, which is why the number is so large.
+预期结果：`Model loading took 6.64 GiB`，`Available KV cache memory: 12.25 GiB`，KV cache 约 130 万个 token，以及在最大 16,384 token 上下文下最大并发约 80 个请求。权重是固定的；vLLM 能分配的所有剩余显存都变成 KV cache，KV cache 决定了可以同时处理多少个请求。混合 Mamba 模型每个 token 所需的缓存远少于纯 Transformer，这就是为什么这个数字如此之大。
 
-== Evidence checkpoint
+== 检查点
 
-Before continuing, verify that you can answer:
+继续之前，请确认您能够回答以下问题：
 
-* Which component answers "which image is version 3.0 of our model", and which answers "which
-  models does Red Hat validate"?
-* What is the difference between the 401 and the 403 you saw?
-* Where does the model server's GPU come from, and how would you prove it?
-* After the weights are loaded, what does vLLM do with the rest of its GPU memory, and why does it
-  matter?
+* 哪个组件回答"我们模型的 3.0 版本对应哪个镜像"，哪个组件回答"红帽验证了哪些模型"？
+* 您看到的 401 和 403 有什么区别？
+* 模型服务器的 GPU 从哪里来？您如何证明？
+* 权重加载后，vLLM 用剩余显存做什么？为什么这很重要？
 
-.Answer key
+.参考答案
 [%collapsible]
 ====
-* The model registry (yours, created from a `ModelRegistry` CR) records versions and artifacts;
-  the model catalog lists Red Hat's validated models.
-* 401: no token, so the proxy does not know who is calling. 403: a valid token, but that identity
-  has no RBAC permission to `get` the InferenceService.
-* From a DRA claim created from the `one-l4` template; `oc get resourceclaims` shows it allocated to
-  `gpu-0` and reserved for the predictor pod.
-* It reserves it as KV cache; the KV cache size bounds how many tokens, and therefore how many
-  concurrent requests, the server can hold.
+* 模型注册表（您的，从 `ModelRegistry` CR 创建）记录版本和制品；模型目录列出红帽的已验证模型。
+* 401：无 token，代理不知道是谁在调用。403：有效的 token，但该身份没有 RBAC 权限 `get` InferenceService。
+* 通过 `one-l4` 模板创建的 DRA 申请；`oc get resourceclaims` 显示其分配到 `gpu-0` 并为 predictor Pod 保留。
+* 预留为 KV cache；KV cache 大小决定了服务器能同时持有多少个 token，从而决定最大并发请求数。
 ====
 
-Day 1 ends here. Leave the model running if you continue to Day 2 on the same cluster; Day 2
-starts by replacing it with a two-replica llm-d deployment.
+第 1 天到此结束。如果在同一集群上继续第 2 天，请保持模型运行；第 2 天将以两副本的 llm-d 部署替换它。
 
-Proceed to xref:90-cleanup.adoc[Cleanup] if you stop here.
+如果在此停止，继续 xref:90-cleanup.adoc[清理]。
