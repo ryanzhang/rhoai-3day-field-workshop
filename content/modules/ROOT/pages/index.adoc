@@ -1,126 +1,105 @@
-= Red Hat AI 3-Day Field Enablement Workshop
-:navtitle: Introduction
+= Red Hat AI 三日现场培训工作坊
+:navtitle: 简介
 
 ifeval::["{feature_maturity}" == "TP"]
-WARNING: This lab uses a *Technology Preview* feature. Technology Preview features are not
-supported with Red Hat production service-level agreements (SLAs) and might not be
-functionally complete.
+WARNING: 本实验使用的是*技术预览版*功能。技术预览版功能不受 Red Hat 生产环境服务级别协议（SLA）的支持，且功能可能不完整。
 endif::[]
 ifeval::["{feature_maturity}" == "DP"]
-WARNING: This lab uses a *Developer Preview* feature. Developer Preview features are provided
-as-is, with no support and no guarantee of future availability.
+WARNING: 本实验使用的是*开发者预览版*功能。开发者预览版功能按原样提供，不提供支持，也不保证将来的可用性。
 endif::[]
 
-From a bare GPU node to a governed, observed, evaluated and guarded AI service on OpenShift AI,
-built by you, one layer at a time.
+从一个裸 GPU 节点出发，在 OpenShift AI 上，逐层构建一个受治理、可观测、经评测、有防护的 AI 服务——由你亲手完成。
 
-This workshop is the hands-on half of a three-day field enablement event. The presentations
-explain the product; the labs make you build it. On your own OpenShift cluster with one NVIDIA L4
-GPU, you write and apply every resource yourself: the GPU driver and Dynamic Resource Allocation,
-the model registry and model server, llm-d, Models-as-a-Service, tracing, evaluation and
-guardrails. Each step states what must be true afterwards, and you check it against what the
-cluster reports. By the end you can explain to a customer not just what OpenShift AI does, but how
-each layer does it and how to prove it.
+本工作坊是为期三天的现场培训活动的实操环节。演示文稿负责讲解产品，实验则让你动手构建。在你自己的 OpenShift 集群上，使用一块 NVIDIA L4 GPU，每一个资源都由你亲自编写和应用：GPU 驱动与动态资源分配（DRA）、模型注册表与模型服务器、llm-d、模型即服务（Models-as-a-Service）、链路追踪、评测以及安全防护。每个步骤都明确告知你操作完成后的预期状态，并要求你与集群实际报告的结果进行比对。完成后，你不仅能向客户解释 OpenShift AI 能做什么，还能说明每一层是如何做到的以及如何验证。
 
-The labs progress through these tasks:
+实验按以下任务逐步推进：
 
-. Make a GPU schedulable with the NVIDIA driver and Kubernetes DRA, and claim it exclusively and
-  shared (Day 1).
-. Find a validated model, record it in a model registry, and serve it with vLLM behind
-  authentication (Day 1).
-. Replace the single server with llm-d and see its scheduler route requests (Day 2).
-. Stand up Models-as-a-Service and publish the model with tiers, keys, limits and usage telemetry
-  (Day 2).
-. Trace an agent with MLflow, evaluate the model, and guard it with NeMo Guardrails (Day 3).
+. 使用 NVIDIA 驱动和 Kubernetes DRA 使 GPU 可被调度，并以独占和共享方式申请使用（第一天）。
+. 查找已验证的模型，将其记录到模型注册表，并通过身份验证使用 vLLM 对外提供服务（第一天）。
+. 用 llm-d 替代单个服务器，观察其调度器如何分发请求（第二天）。
+. 搭建模型即服务，以分层、密钥、限额和使用量遥测的方式发布模型（第二天）。
+. 使用 MLflow 追踪 Agent，评测模型，并用 NeMo Guardrails 进行安全防护（第三天）。
 
-== Learning objectives
+== 学习目标
 
-By the end of the workshop you will be able to:
+完成本工作坊后，你将能够：
 
-* Explain and demonstrate how a Kubernetes workload gets, and shares, a GPU through DRA.
-* Onboard a model from the catalog through the registry to an authenticated vLLM endpoint.
-* Explain what llm-d's scheduler adds over a single vLLM and show it routing.
-* Stand up Models-as-a-Service and govern access with subscriptions, API keys and rate limits.
-* Trace, evaluate and guard a model-backed application with MLflow, EvalHub and NeMo Guardrails.
+* 解释并演示 Kubernetes 工作负载如何通过 DRA 获取和共享 GPU。
+* 将模型从目录经注册表接入，并部署到带身份验证的 vLLM 端点。
+* 解释 llm-d 的调度器相比单个 vLLM 增加了哪些能力，并展示其路由过程。
+* 搭建模型即服务，通过订阅、API 密钥和限速规则治理访问权限。
+* 使用 MLflow、EvalHub 和 NeMo Guardrails 对模型支持的应用进行追踪、评测和防护。
 
-== How to run the lab
+== 如何运行实验
 
-Each exercise names the state to change, the evidence to inspect, and the result that must be
-verified. Do not treat command completion as proof. Compare the observed resource, field or event
-with the stated expected result before continuing. Facilitators: see
-xref:92-facilitator-guide.adoc[Facilitator Guide].
+每个练习都明确说明了需要改变的状态、需要检查的证据，以及必须验证的结果。不要将命令执行完成视为完成的证明。继续之前，请将实际观察到的资源、字段或事件与预期结果进行比对。培训师请参阅
+xref:92-facilitator-guide.adoc[培训师指南]。
 
-== Lab map
+== 实验地图
 
 [cols="1,1,3,1",options="header"]
 |===
-| Day | Module | Outcome | Time
+| 天次 | 模块 | 预期成果 | 时长
 
-| Day 1
-| 1. Your cluster
-| identity, rights and an inventory: a GPU node that nothing can use yet
-| 15 min
+| 第一天
+| 1. 你的集群
+| 身份、权限与清单：一个 GPU 节点，但暂时没有任何工作负载可以使用
+| 15 分钟
 
-| Day 1
-| 2. GPUs the DRA way
-| driver and DRA stack running; GPU claimed by property, exclusively and shared
-| 40 min
+| 第一天
+| 2. DRA 方式使用 GPU
+| 驱动与 DRA 技术栈运行就绪；GPU 以属性方式申请，包括独占和共享
+| 40 分钟
 
-| Day 1
-| 3. Onboard a model
-| catalog → registry → authenticated vLLM on a claimed GPU; 401 / 403 / 200 proven
-| 35 min
+| 第一天
+| 3. 接入模型
+| 目录 → 注册表 → 在申请的 GPU 上运行带身份验证的 vLLM；验证 401 / 403 / 200
+| 35 分钟
 
-| Day 2
+| 第二天
 | 4. llm-d
-| two replicas behind llm-d's scheduler; routing decisions observed
-| 55 min
+| 两个副本由 llm-d 调度器管理；观察路由决策
+| 55 分钟
 
-| Day 2
-| 5. Stand up MaaS
-| Kuadrant, gateway and Models-as-a-Service running
-| 50 min
+| 第二天
+| 5. 搭建 MaaS
+| Kuadrant、网关和模型即服务运行就绪
+| 50 分钟
 
-| Day 2
-| 6. Govern and consume MaaS
-| tiers, API keys, 401 / 200 / 429, usage telemetry; consumed by an application
-| 80 min
+| 第二天
+| 6. 治理与使用 MaaS
+| 分层、API 密钥、401 / 200 / 429、使用量遥测；由应用程序消费
+| 80 分钟
 
-| Day 3
-| 7. Trace an agent with MLflow
-| a tool-calling agent's spans, tokens and latency in MLflow
-| 45 min
+| 第三天
+| 7. 用 MLflow 追踪 Agent
+| 在 MLflow 中查看工具调用 Agent 的 span、token 和延迟
+| 45 分钟
 
-| Day 3
-| 8. Evaluate with EvalHub
-| a benchmark run against the served model, and what it does and does not prove
-| 30 min
+| 第三天
+| 8. 用 EvalHub 进行评测
+| 对已部署模型运行基准测试，了解其证明范围与局限性
+| 30 分钟
 
-| Day 3
-| 9. Guard it with NeMo Guardrails
-| an authenticated guardrails endpoint, measured against a labelled prompt set
-| 50 min
+| 第三天
+| 9. 用 NeMo Guardrails 守护模型
+| 一个带身份验证的防护端点，并针对带标签的 prompt 集进行测量
+| 50 分钟
 |===
 
-*Total:* about 6.7 hours of labs over three days.
+*总计：* 三天约 6.7 小时的实验。
 
-== Technical model
+== 技术模型
 
-* *GPU layer:* the NVIDIA driver makes the GPU work on the node; the NVIDIA DRA driver publishes it
-  as a described device; the Kubernetes scheduler allocates it to claims.
-* *Model layer:* the model catalog lists validated models; your model registry records the
-  versions you use; KServe runs vLLM, which turns GPU memory into weights plus KV cache.
-* *Routing layer:* llm-d's endpoint picker chooses a replica per request from live server state.
-* *Service layer:* Models-as-a-Service, enforced by Red Hat Connectivity Link (Kuadrant) on a
-  Gateway API gateway, turns a model into a governed internal service with keys, tiers and limits.
-* *Trust layer:* MLflow traces what an application did, EvalHub measures model quality, and NeMo
-  Guardrails decides what may reach the model.
+* *GPU 层：* NVIDIA 驱动使 GPU 在节点上可用；NVIDIA DRA 驱动将其发布为描述设备；Kubernetes 调度器将其分配给申请（ResourceClaim）。
+* *模型层：* 模型目录列出已验证的模型；你的模型注册表记录你所使用的版本；KServe 运行 vLLM，将 GPU 显存转换为权重和 KV Cache。
+* *路由层：* llm-d 的端点选择器根据服务器实时状态，为每个请求选择合适的副本。
+* *服务层：* 模型即服务，由 Red Hat Connectivity Link（Kuadrant）在 Gateway API 网关上执行，将模型转变为带密钥、分层和限额的受治理内部服务。
+* *信任层：* MLflow 追踪应用程序的操作记录，EvalHub 评测模型质量，NeMo Guardrails 决定哪些内容可以到达模型。
 
-No single layer answers the customer's whole question. A GPU claim does not authenticate anyone, an
-API key does not prove the model is accurate, and a benchmark does not stop a harmful prompt. The
-workshop builds all five so you can show where each guarantee comes from.
+没有哪一层能单独回答客户的全部问题。GPU 申请不会对任何人进行身份验证，API 密钥无法证明模型的准确性，而基准测试也无法阻止恶意 prompt。本工作坊构建全部五层，让你能够展示每项保证的来源。
 
-== Start here
+== 从这里开始
 
-Read xref:01-overview.adoc[Architecture and Control Boundaries], then check your environment in
-xref:02-details.adoc[Prerequisites and Environment].
+请先阅读 xref:01-overview.adoc[架构与控制边界]，然后在
+xref:02-details.adoc[前提条件与环境]中检查你的环境。
